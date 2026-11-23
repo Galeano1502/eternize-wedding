@@ -1,4 +1,4 @@
-const CACHE_NAME = 'eternize-v1';
+const CACHE_NAME = 'eternize-v2';
 const CORE_ASSETS = ['/', '/index.html', '/favicon.svg', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
