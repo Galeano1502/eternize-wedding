@@ -17,11 +17,14 @@ import {
   XCircle,
   Users,
   FileText,
+  QrCode,
+  KeyRound,
 } from 'lucide-react';
 import EmptyState from '../components/ui/EmptyState';
 import GuestModal from '../components/modals/GuestModal';
 import InviteModal from '../components/modals/InviteModal';
 import ImportModal from '../components/modals/ImportModal';
+import PrintQrModal from '../components/modals/PrintQrModal';
 import {
   addGuest,
   updateGuest,
@@ -40,7 +43,15 @@ const RSVP_CYCLE = {
   recusado: 'pendente',
 };
 
-export default function GuestsAdmin({ uid, wedding, guests, stats, tables, onNotify }) {
+export default function GuestsAdmin({
+  uid,
+  wedding,
+  guests,
+  stats,
+  tables,
+  onOpenGuestPreview,
+  onNotify,
+}) {
   const [search, setSearch] = useState('');
   const [filterRsvp, setFilterRsvp] = useState('todos');
   const [filterInvite, setFilterInvite] = useState('todos');
@@ -55,6 +66,7 @@ export default function GuestsAdmin({ uid, wedding, guests, stats, tables, onNot
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [invitingGuest, setInvitingGuest] = useState(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [printQrOpen, setPrintQrOpen] = useState(false);
 
   const tablesMap = useMemo(() => {
     const map = {};
@@ -63,6 +75,10 @@ export default function GuestsAdmin({ uid, wedding, guests, stats, tables, onNot
     });
     return map;
   }, [tables]);
+
+  const existingPins = useMemo(() => {
+    return new Set(guests.map((g) => g.pin).filter(Boolean));
+  }, [guests]);
 
   const filteredGuests = useMemo(() => {
     return guests
@@ -73,6 +89,7 @@ export default function GuestsAdmin({ uid, wedding, guests, stats, tables, onNot
             g.name?.toLowerCase().includes(q) ||
             g.phone?.toLowerCase().includes(q) ||
             g.email?.toLowerCase().includes(q) ||
+            g.pin?.toLowerCase().includes(q) ||
             g.dietary?.toLowerCase().includes(q);
           if (!match) return false;
         }
@@ -116,7 +133,7 @@ export default function GuestsAdmin({ uid, wedding, guests, stats, tables, onNot
       await updateGuest(uid, guestId, payload);
       onNotify?.('Convidado atualizado com sucesso!');
     } else {
-      await addGuest(uid, payload);
+      await addGuest(uid, payload, existingPins);
       onNotify?.('Convidado adicionado à lista!');
     }
   };
@@ -126,7 +143,7 @@ export default function GuestsAdmin({ uid, wedding, guests, stats, tables, onNot
     if (guestId) {
       await updateGuest(uid, guestId, payload);
     } else {
-      targetId = await addGuest(uid, payload);
+      targetId = await addGuest(uid, payload, existingPins);
     }
     setInvitingGuest({ id: targetId, ...payload });
     setInviteModalOpen(true);
@@ -173,435 +190,430 @@ export default function GuestsAdmin({ uid, wedding, guests, stats, tables, onNot
 
   return (
     <div className="space-y-6">
-      {/* Cabeçalho da Administração de Convidados */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 no-print">
+      {/* Barra Superior */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-ink">Administração de Convidados</h2>
+          <h2 className="text-2xl font-bold text-ink">Administrar Convidados</h2>
           <p className="text-sm text-muted">
-            Gerencie confirmações RSVP, envie convites por WhatsApp/E-mail e organize mesas em tempo real.
+            {stats.totalInvites} convite(s) • {stats.totalPeople} pessoa(s) •{' '}
+            {stats.invitesSent} enviado(s)
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 no-print">
           <button
+            type="button"
+            onClick={() => {
+              setEditingGuest(null);
+              setGuestModalOpen(true);
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent text-accent-contrast text-sm font-semibold hover:opacity-90 cursor-pointer"
+          >
+            <UserPlus className="w-4 h-4" />
+            Novo Convidado
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setPrintQrOpen(true)}
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-accent/15 border border-theme text-ink text-sm font-semibold hover:bg-subtle cursor-pointer"
+          >
+            <QrCode className="w-4 h-4" />
+            QR Code Convite Impresso
+          </button>
+
+          <button
+            type="button"
             onClick={() => {
               setInvitingGuest(null);
               setInviteModalOpen(true);
             }}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-card border border-theme text-ink text-xs font-semibold hover:bg-subtle transition cursor-pointer"
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-card border border-theme text-ink text-sm font-semibold hover:bg-subtle cursor-pointer"
           >
             <FileText className="w-4 h-4" />
-            Modelo de Convite
+            Modelo Convite
           </button>
 
           <button
+            type="button"
             onClick={() => setImportModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-card border border-theme text-ink text-xs font-semibold hover:bg-subtle transition cursor-pointer"
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-card border border-theme text-ink text-sm font-semibold hover:bg-subtle cursor-pointer"
           >
             <Upload className="w-4 h-4" />
-            Importar Lista
+            Importar
           </button>
 
           <button
-            onClick={() => exportGuestsCSV(filteredGuests, tablesMap)}
-            disabled={guests.length === 0}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-card border border-theme text-ink text-xs font-semibold hover:bg-subtle disabled:opacity-40 transition cursor-pointer"
+            type="button"
+            onClick={() => exportGuestsCSV(guests, tablesMap)}
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-card border border-theme text-ink text-sm font-semibold hover:bg-subtle cursor-pointer"
           >
             <Download className="w-4 h-4" />
             CSV
           </button>
 
           <button
+            type="button"
             onClick={() => window.print()}
-            disabled={guests.length === 0}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-card border border-theme text-ink text-xs font-semibold hover:bg-subtle disabled:opacity-40 transition cursor-pointer"
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-card border border-theme text-ink text-sm font-semibold hover:bg-subtle cursor-pointer"
           >
             <Printer className="w-4 h-4" />
-            Portaria
-          </button>
-
-          <button
-            onClick={() => {
-              setEditingGuest(null);
-              setGuestModalOpen(true);
-            }}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-accent text-accent-contrast text-xs font-semibold hover:opacity-90 transition cursor-pointer"
-          >
-            <UserPlus className="w-4 h-4" />
-            Novo Convidado
+            Imprimir
           </button>
         </div>
       </div>
 
-      {/* 4 Sub-KPIs Exclusivos de Convidados */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 no-print">
-        <div className="bg-card border border-theme rounded-xl p-4">
-          <div className="text-xs text-muted font-semibold uppercase">Total na Lista</div>
-          <div className="text-2xl font-bold text-ink mt-1">{stats.totalPeople} pessoas</div>
-          <div className="text-xs text-muted mt-0.5">
-            {stats.totalAdults} adultos • {stats.totalChildren} crianças • {stats.totalInvites} convites
+      {/* Filtros & Busca */}
+      {guests.length > 0 && (
+        <div className="bg-card border border-theme rounded-2xl p-4 space-y-3 no-print">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+            <div className="relative lg:col-span-2">
+              <Search className="w-4 h-4 text-muted absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Buscar nome, PIN, celular, restrição..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs focus:outline-none"
+              />
+            </div>
+
+            <select
+              value={filterRsvp}
+              onChange={(e) => setFilterRsvp(e.target.value)}
+              className="px-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs focus:outline-none"
+            >
+              <option value="todos">RSVP: Todos</option>
+              <option value="confirmado">Confirmados</option>
+              <option value="pendente">Pendentes</option>
+              <option value="recusado">Recusados</option>
+            </select>
+
+            <select
+              value={filterInvite}
+              onChange={(e) => setFilterInvite(e.target.value)}
+              className="px-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs focus:outline-none"
+            >
+              <option value="todos">Convite: Todos</option>
+              <option value="enviado">Enviados</option>
+              <option value="pendente">Não enviados</option>
+            </select>
+
+            <select
+              value={filterGroup}
+              onChange={(e) => setFilterGroup(e.target.value)}
+              className="px-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs focus:outline-none"
+            >
+              <option value="todos">Grupo: Todos</option>
+              <option value="Família Noiva">Família Noiva</option>
+              <option value="Família Noivo">Família Noivo</option>
+              <option value="Padrinhos">Padrinhos</option>
+              <option value="Amigos">Amigos</option>
+              <option value="Trabalho">Trabalho</option>
+              <option value="Outros">Outros</option>
+            </select>
+
+            <select
+              value={filterTable}
+              onChange={(e) => setFilterTable(e.target.value)}
+              className="px-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs focus:outline-none"
+            >
+              <option value="todos">Mesa: Todas</option>
+              <option value="sem_mesa">Sem mesa</option>
+              {tables.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+            <div className="flex items-center gap-2 text-xs text-muted">
+              <span>Ordenar por:</span>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="px-2.5 py-1 rounded-lg bg-primary border border-theme text-ink text-xs"
+              >
+                <option value="name">Nome (A-Z)</option>
+                <option value="group">Grupo</option>
+                <option value="rsvp">Status RSVP</option>
+                <option value="people">Qtd. Pessoas</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setViewMode('table')}
+                className={`p-2 rounded-lg cursor-pointer ${
+                  viewMode === 'table' ? 'bg-accent text-accent-contrast' : 'bg-subtle text-ink'
+                }`}
+                title="Visualização em Tabela"
+              >
+                <LayoutList className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('cards')}
+                className={`p-2 rounded-lg cursor-pointer ${
+                  viewMode === 'cards' ? 'bg-accent text-accent-contrast' : 'bg-subtle text-ink'
+                }`}
+                title="Visualização em Cartões"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
+      )}
 
-        <div className="bg-card border border-theme rounded-xl p-4">
-          <div className="text-xs text-muted font-semibold uppercase">Status RSVP</div>
-          <div className="text-2xl font-bold text-ink mt-1">
-            {stats.confirmedPeople} confirmados
-          </div>
-          <div className="text-xs text-muted mt-0.5">
-            {stats.pendingPeople} pendentes • {stats.declinedPeople} recusados
+      {/* Ações em Lote */}
+      {selectedIds.length > 0 && (
+        <div className="bg-accent text-accent-contrast rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3 no-print">
+          <span className="text-xs font-bold">
+            {selectedIds.length} convidado(s) selecionado(s)
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={async () => {
+                await bulkUpdateGuests(uid, selectedIds, { rsvp: 'confirmado' });
+                setSelectedIds([]);
+                onNotify?.('Convidados confirmados em lote!');
+              }}
+              className="px-3 py-1.5 rounded-lg bg-card text-ink text-xs font-semibold cursor-pointer"
+            >
+              Confirmar Presença
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                await bulkUpdateGuests(uid, selectedIds, { inviteSent: true });
+                setSelectedIds([]);
+                onNotify?.('Convites marcados como enviados!');
+              }}
+              className="px-3 py-1.5 rounded-lg bg-card text-ink text-xs font-semibold cursor-pointer"
+            >
+              Marcar Enviado
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!window.confirm(`Excluir ${selectedIds.length} convidado(s)?`)) return;
+                await bulkDeleteGuests(uid, selectedIds);
+                setSelectedIds([]);
+                onNotify?.('Convidados removidos.', 'info');
+              }}
+              className="px-3 py-1.5 rounded-lg bg-card text-ink text-xs font-semibold cursor-pointer"
+            >
+              Excluir
+            </button>
           </div>
         </div>
+      )}
 
-        <div className="bg-card border border-theme rounded-xl p-4">
-          <div className="text-xs text-muted font-semibold uppercase">Envio de Convites</div>
-          <div className="text-2xl font-bold text-ink mt-1">
-            {stats.invitesSent} / {stats.totalInvites} enviados
-          </div>
-          <div className="text-xs text-muted mt-0.5">
-            {stats.invitesPending} aguardando envio
-          </div>
-        </div>
-
-        <div className="bg-card border border-theme rounded-xl p-4">
-          <div className="text-xs text-muted font-semibold uppercase">Mesas & Restrições</div>
-          <div className="text-2xl font-bold text-ink mt-1">
-            {stats.withTable} alocados
-          </div>
-          <div className="text-xs text-muted mt-0.5">
-            {stats.withDietary} com restrição alimentar
-          </div>
-        </div>
-      </div>
-
+      {/* Lista de Convidados */}
       {guests.length === 0 ? (
         <EmptyState
           icon={Users}
-          title="Sua lista de convidados está vazia"
-          description="Adicione convidados manualmente com celular ou e-mail para enviar convites personalizados, ou importe uma lista completa de uma só vez."
+          title="Nenhum convidado cadastrado"
+          description="Adicione seus convidados com celular ou nome para gerar automaticamente o PIN de acesso ao convite."
           actionLabel="Adicionar Primeiro Convidado"
           onAction={() => {
             setEditingGuest(null);
             setGuestModalOpen(true);
           }}
         />
-      ) : (
-        <>
-          {/* Barra de Busca e Filtros */}
-          <div className="bg-card border border-theme rounded-2xl p-4 space-y-3 no-print">
-            <div className="grid grid-cols-1 md:grid-cols-6 gap-2.5">
-              <div className="md:col-span-2 relative">
-                <Search className="w-4 h-4 absolute left-3 top-3 text-muted" />
-                <input
-                  type="text"
-                  placeholder="Buscar por nome, telefone, e-mail..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs focus:outline-none"
-                />
-              </div>
-
-              <select
-                value={filterRsvp}
-                onChange={(e) => setFilterRsvp(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs focus:outline-none"
-              >
-                <option value="todos">RSVP: Todos</option>
-                <option value="confirmado">Confirmados</option>
-                <option value="pendente">Pendentes</option>
-                <option value="recusado">Recusados</option>
-              </select>
-
-              <select
-                value={filterInvite}
-                onChange={(e) => setFilterInvite(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs focus:outline-none"
-              >
-                <option value="todos">Convite: Todos</option>
-                <option value="enviado">Convite Enviado</option>
-                <option value="pendente">Não Enviado</option>
-              </select>
-
-              <select
-                value={filterGroup}
-                onChange={(e) => setFilterGroup(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs focus:outline-none"
-              >
-                <option value="todos">Grupo: Todos</option>
-                <option value="Família Noiva">Família Noiva</option>
-                <option value="Família Noivo">Família Noivo</option>
-                <option value="Amigos">Amigos</option>
-                <option value="Padrinhos">Padrinhos</option>
-                <option value="Trabalho">Trabalho</option>
-              </select>
-
-              <div className="flex items-center gap-2">
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
-                  className="flex-1 px-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs focus:outline-none"
-                >
-                  <option value="name">Ordenar: Nome</option>
-                  <option value="group">Ordenar: Grupo</option>
-                  <option value="rsvp">Ordenar: RSVP</option>
-                  <option value="people">Ordenar: Qtd. Pessoas</option>
-                </select>
-
-                <div className="flex rounded-xl bg-subtle p-1">
-                  <button
-                    onClick={() => setViewMode('table')}
-                    className={`p-1.5 rounded-lg cursor-pointer ${
-                      viewMode === 'table' ? 'bg-accent text-accent-contrast' : 'text-ink'
-                    }`}
-                    title="Visualização em Tabela"
-                  >
-                    <LayoutList className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setViewMode('cards')}
-                    className={`p-1.5 rounded-lg cursor-pointer ${
-                      viewMode === 'cards' ? 'bg-accent text-accent-contrast' : 'text-ink'
-                    }`}
-                    title="Visualização em Cards"
-                  >
-                    <LayoutGrid className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Barra de Ações em Lote */}
-            {selectedIds.length > 0 && (
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-theme">
-                <span className="text-xs font-bold text-ink">
-                  {selectedIds.length} convidado(s) selecionado(s)
-                </span>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={async () => {
-                      await bulkUpdateGuests(uid, selectedIds, { rsvp: 'confirmado' });
-                      setSelectedIds([]);
-                      onNotify?.('Convidados confirmados em lote!');
-                    }}
-                    className="px-3 py-1.5 rounded-lg bg-accent text-accent-contrast text-xs font-semibold cursor-pointer"
-                  >
-                    Confirmar RSVP
-                  </button>
-                  <button
-                    onClick={async () => {
-                      await bulkUpdateGuests(uid, selectedIds, { inviteSent: true, inviteChannel: 'lote' });
-                      setSelectedIds([]);
-                      onNotify?.('Convites marcados como enviados!');
-                    }}
-                    className="px-3 py-1.5 rounded-lg bg-subtle text-ink text-xs font-semibold cursor-pointer"
-                  >
-                    Marcar Convite Enviado
-                  </button>
-                  {tables.length > 0 && (
-                    <select
-                      defaultValue=""
-                      onChange={async (e) => {
-                        if (!e.target.value) return;
-                        await bulkUpdateGuests(uid, selectedIds, { tableId: e.target.value });
-                        setSelectedIds([]);
-                        onNotify?.('Mesa atribuída em lote!');
-                      }}
-                      className="px-2.5 py-1.5 rounded-lg bg-primary border border-theme text-ink text-xs"
-                    >
-                      <option value="">Atribuir Mesa...</option>
-                      {tables.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  <button
-                    onClick={async () => {
-                      await bulkDeleteGuests(uid, selectedIds);
-                      setSelectedIds([]);
-                      onNotify?.('Convidados removidos.');
-                    }}
-                    className="px-3 py-1.5 rounded-lg bg-subtle text-ink text-xs font-semibold hover:opacity-80 cursor-pointer"
-                  >
-                    Excluir Selecionados
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Listagem Tabela ou Cards */}
-          {viewMode === 'table' ? (
-            <div className="bg-card border border-theme rounded-2xl overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-subtle text-xs uppercase tracking-wider text-muted">
-                  <tr>
-                    <th className="p-3.5 no-print">
+      ) : viewMode === 'table' ? (
+        <div className="bg-card border border-theme rounded-2xl overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-subtle text-ink text-xs uppercase tracking-wider">
+              <tr>
+                <th className="p-3.5 w-10 no-print">
+                  <input
+                    type="checkbox"
+                    checked={
+                      filteredGuests.length > 0 &&
+                      selectedIds.length === filteredGuests.length
+                    }
+                    onChange={toggleSelectAll}
+                  />
+                </th>
+                <th className="p-3.5">Convidado</th>
+                <th className="p-3.5">PIN</th>
+                <th className="p-3.5">Contato</th>
+                <th className="p-3.5">Pessoas</th>
+                <th className="p-3.5">Mesa</th>
+                <th className="p-3.5">RSVP</th>
+                <th className="p-3.5 text-right no-print">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredGuests.map((guest) => {
+                const total = (Number(guest.adults) || 0) + (Number(guest.children) || 0);
+                return (
+                  <tr key={guest.id} className="border-t border-theme hover:bg-subtle/40">
+                    <td className="p-3.5 no-print">
                       <input
                         type="checkbox"
-                        checked={
-                          filteredGuests.length > 0 &&
-                          selectedIds.length === filteredGuests.length
-                        }
-                        onChange={toggleSelectAll}
+                        checked={selectedIds.includes(guest.id)}
+                        onChange={() => toggleSelectOne(guest.id)}
                       />
-                    </th>
-                    <th className="p-3.5">Convidado</th>
-                    <th className="p-3.5">Contato</th>
-                    <th className="p-3.5">Grupo / Pessoas</th>
-                    <th className="p-3.5">RSVP</th>
-                    <th className="p-3.5">Convite</th>
-                    <th className="p-3.5">Mesa</th>
-                    <th className="p-3.5 text-right no-print">Ações</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredGuests.map((g) => (
-                    <tr key={g.id} className="border-t border-theme hover:bg-subtle/40">
-                      <td className="p-3.5 no-print">
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.includes(g.id)}
-                          onChange={() => toggleSelectOne(g.id)}
-                        />
-                      </td>
-                      <td className="p-3.5">
-                        <div className="font-semibold text-ink">{g.name}</div>
-                        {g.dietary && (
-                          <div className="text-xs text-muted mt-0.5">Obs: {g.dietary}</div>
-                        )}
-                      </td>
-                      <td className="p-3.5 text-xs text-muted space-y-1">
-                        {g.phone && (
-                          <div className="flex items-center gap-1">
-                            <Phone className="w-3 h-3" /> {g.phone}
-                          </div>
-                        )}
-                        {g.email && (
-                          <div className="flex items-center gap-1">
-                            <Mail className="w-3 h-3" /> {g.email}
-                          </div>
-                        )}
-                        {!g.phone && !g.email && <span>Sem contato</span>}
-                      </td>
-                      <td className="p-3.5 text-xs">
-                        <div className="font-medium text-ink">{g.group}</div>
-                        <div className="text-muted">
-                          {g.adults ?? 1} adulto(s)
-                          {Number(g.children) > 0 ? ` + ${g.children} criança(s)` : ''}
+                    </td>
+                    <td className="p-3.5">
+                      <div className="font-semibold text-ink">{guest.name}</div>
+                      <div className="text-xs text-muted">{guest.group}</div>
+                      {guest.dietary && (
+                        <div className="text-[11px] text-ink mt-0.5">
+                          Obs: {guest.dietary}
                         </div>
-                      </td>
-                      <td className="p-3.5">{renderRsvpBadge(g)}</td>
-                      <td className="p-3.5 text-xs">
-                        {g.inviteSent ? (
-                          <span className="px-2.5 py-1 rounded-full bg-subtle text-ink font-medium">
-                            Enviado ({g.inviteChannel || 'ok'})
-                          </span>
-                        ) : (
-                          <span className="text-muted">Não enviado</span>
-                        )}
-                      </td>
-                      <td className="p-3.5 text-xs text-ink">
-                        {g.tableId ? tablesMap[g.tableId] || 'Atribuída' : '—'}
-                      </td>
-                      <td className="p-3.5 text-right no-print">
-                        <div className="inline-flex items-center gap-1.5">
-                          <button
-                            onClick={() => {
-                              setInvitingGuest(g);
-                              setInviteModalOpen(true);
-                            }}
-                            title="Enviar Convite"
-                            className="p-2 rounded-lg bg-accent text-accent-contrast hover:opacity-90 cursor-pointer"
-                          >
-                            <Send className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setEditingGuest(g);
-                              setGuestModalOpen(true);
-                            }}
-                            title="Editar"
-                            className="p-2 rounded-lg bg-subtle text-ink hover:opacity-80 cursor-pointer"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={async () => {
-                              await deleteGuest(uid, g.id);
-                              onNotify?.('Convidado excluído.');
-                            }}
-                            title="Excluir"
-                            className="p-2 rounded-lg bg-subtle text-ink hover:opacity-80 cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                      )}
+                    </td>
+                    <td className="p-3.5">
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-subtle border border-theme font-mono text-xs font-bold text-ink">
+                        <KeyRound className="w-3 h-3 text-muted" />
+                        {guest.pin || '----'}
+                      </span>
+                    </td>
+                    <td className="p-3.5 text-xs text-muted space-y-1">
+                      {guest.phone && (
+                        <div className="flex items-center gap-1.5">
+                          <Phone className="w-3.5 h-3.5" /> {guest.phone}
                         </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredGuests.map((g) => (
-                <div
-                  key={g.id}
-                  className="bg-card border border-theme rounded-2xl p-4 flex flex-col justify-between gap-3"
-                >
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <h3 className="font-bold text-ink">{g.name}</h3>
-                        <span className="text-xs text-muted">
-                          {g.group} • {g.adults ?? 1}A + {g.children ?? 0}C
+                      )}
+                      {guest.email && (
+                        <div className="flex items-center gap-1.5">
+                          <Mail className="w-3.5 h-3.5" /> {guest.email}
+                        </div>
+                      )}
+                      {!guest.phone && !guest.email && <span>Sem contato</span>}
+                    </td>
+                    <td className="p-3.5 text-xs font-semibold text-ink">
+                      {total} ({guest.adults ?? 1}A + {guest.children ?? 0}C)
+                    </td>
+                    <td className="p-3.5 text-xs">
+                      {guest.tableId && tablesMap[guest.tableId] ? (
+                        <span className="px-2.5 py-1 rounded-full bg-subtle text-ink font-medium">
+                          {tablesMap[guest.tableId]}
                         </span>
+                      ) : (
+                        <span className="text-muted">Sem mesa</span>
+                      )}
+                    </td>
+                    <td className="p-3.5">{renderRsvpBadge(guest)}</td>
+                    <td className="p-3.5 text-right no-print">
+                      <div className="inline-flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInvitingGuest(guest);
+                            setInviteModalOpen(true);
+                          }}
+                          title="Enviar convite / Ver QR Code individual"
+                          className={`p-2 rounded-lg cursor-pointer ${
+                            guest.inviteSent
+                              ? 'bg-accent text-accent-contrast'
+                              : 'bg-subtle text-ink'
+                          }`}
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingGuest(guest);
+                            setGuestModalOpen(true);
+                          }}
+                          title="Editar convidado"
+                          className="p-2 rounded-lg bg-subtle text-ink cursor-pointer"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await deleteGuest(uid, guest.id);
+                            onNotify?.('Convidado excluído.', 'info');
+                          }}
+                          title="Excluir convidado"
+                          className="p-2 rounded-lg bg-subtle text-ink cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
-                      {renderRsvpBadge(g)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredGuests.map((guest) => {
+            const total = (Number(guest.adults) || 0) + (Number(guest.children) || 0);
+            return (
+              <div
+                key={guest.id}
+                className="bg-card border border-theme rounded-2xl p-4 flex flex-col justify-between gap-3"
+              >
+                <div className="space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h3 className="font-bold text-ink">{guest.name}</h3>
+                      <span className="text-xs text-muted">
+                        {guest.group} • {total} pessoa(s)
+                      </span>
                     </div>
-
-                    <div className="mt-3 space-y-1 text-xs text-muted">
-                      {g.phone && <div>Celular: {g.phone}</div>}
-                      {g.email && <div>E-mail: {g.email}</div>}
-                      <div>
-                        Mesa: {g.tableId ? tablesMap[g.tableId] || 'Atribuída' : 'Sem mesa'}
-                      </div>
-                      {g.dietary && <div>Restrição: {g.dietary}</div>}
-                    </div>
+                    {renderRsvpBadge(guest)}
                   </div>
 
-                  <div className="flex items-center justify-between pt-3 border-t border-theme">
-                    <span className="text-xs text-muted">
-                      {g.inviteSent ? `Convite: ${g.inviteChannel}` : 'Convite pendente'}
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-subtle border border-theme font-mono font-bold text-ink">
+                      PIN: {guest.pin || '----'}
                     </span>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => {
-                          setInvitingGuest(g);
-                          setInviteModalOpen(true);
-                        }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-accent text-accent-contrast text-xs font-semibold cursor-pointer"
-                      >
-                        <Send className="w-3 h-3" /> Convidar
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditingGuest(g);
-                          setGuestModalOpen(true);
-                        }}
-                        className="p-1.5 rounded-lg bg-subtle text-ink cursor-pointer"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                    {guest.phone && <span className="text-muted">{guest.phone}</span>}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </>
+
+                <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-theme no-print">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInvitingGuest(guest);
+                      setInviteModalOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-accent text-accent-contrast text-xs font-semibold cursor-pointer"
+                  >
+                    <Send className="w-3 h-3" /> Convite
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingGuest(guest);
+                      setGuestModalOpen(true);
+                    }}
+                    className="p-1.5 rounded-lg bg-subtle text-ink cursor-pointer"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await deleteGuest(uid, guest.id);
+                      onNotify?.('Convidado excluído.', 'info');
+                    }}
+                    className="p-1.5 rounded-lg bg-subtle text-ink cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
 
       {/* Modais */}
@@ -619,6 +631,7 @@ export default function GuestsAdmin({ uid, wedding, guests, stats, tables, onNot
         onClose={() => setInviteModalOpen(false)}
         guest={invitingGuest}
         wedding={wedding}
+        weddingId={uid}
         onSaveTemplate={(tpl) => updateWeddingInfo(uid, { inviteTemplate: tpl })}
         onMarkSent={(id, channel) => markInviteSent(uid, id, channel)}
         onNotify={onNotify}
@@ -628,9 +641,19 @@ export default function GuestsAdmin({ uid, wedding, guests, stats, tables, onNot
         isOpen={importModalOpen}
         onClose={() => setImportModalOpen(false)}
         onImport={async (rows) => {
-          await bulkImportGuests(uid, rows);
+          await bulkImportGuests(uid, rows, existingPins);
           onNotify?.(`${rows.length} convidado(s) importado(s)!`);
         }}
+      />
+
+      <PrintQrModal
+        isOpen={printQrOpen}
+        onClose={() => setPrintQrOpen(false)}
+        weddingId={uid}
+        wedding={wedding}
+        guests={guests}
+        onOpenGuestPreview={onOpenGuestPreview}
+        onNotify={onNotify}
       />
     </div>
   );

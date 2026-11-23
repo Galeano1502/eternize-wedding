@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus,
   Trash2,
@@ -21,8 +21,14 @@ import {
   MousePointer2,
   Minus,
   Layers,
+  Users,
+  UserPlus,
+  UserMinus,
+  Search,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { updateWeddingInfo } from '../services/weddingService';
+import { updateGuest } from '../services/guestService';
 
 const PX_PER_METER = 52;
 
@@ -73,12 +79,17 @@ export default function LayoutPlanner({
 
   const [draftWidth, setDraftWidth] = useState(roomWidth);
   const [draftLength, setDraftLength] = useState(roomLength);
-  const [tool, setTool] = useState('select'); // 'select' | 'ruler'
+  const [tool, setTool] = useState('select');
   const [zoom, setZoom] = useState(1);
   const [snapToGrid, setSnapToGrid] = useState(true);
   const [showSubGrid, setShowSubGrid] = useState(true);
 
-  const [selected, setSelected] = useState(null); // { id, kind: 'table' | 'item' }
+  const [selected, setSelected] = useState(null);
+  const [sidebarTab, setSidebarTab] = useState('tokens');
+  const [guestSearch, setGuestSearch] = useState('');
+  const [guestScope, setGuestScope] = useState('unassigned');
+  const guestSearchRef = useRef(null);
+
   const [dragState, setDragState] = useState(null);
   const [draftPos, setDraftPos] = useState(null);
   const [resizeState, setResizeState] = useState(null);
@@ -96,6 +107,14 @@ export default function LayoutPlanner({
     roomShape === 'l-shape'
       ? Math.round(roomWidth * roomLength * 0.75)
       : Math.round(roomWidth * roomLength);
+
+  const tablesMap = useMemo(() => {
+    const map = {};
+    tables.forEach((t) => {
+      map[t.id] = t.name;
+    });
+    return map;
+  }, [tables]);
 
   const occupancyByTable = useMemo(() => {
     const map = {};
@@ -116,6 +135,41 @@ export default function LayoutPlanner({
     const found = layoutItems.find((i) => i.id === selected.id);
     return found ? { ...found, kind: 'item' } : null;
   }, [selected, tables, layoutItems]);
+
+  const selectedTableGuests = useMemo(() => {
+    if (!selectedEntity || selectedEntity.kind !== 'table') return [];
+    return guests
+      .filter((g) => g.tableId === selectedEntity.id)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [selectedEntity, guests]);
+
+  const availableGuestsForTable = useMemo(() => {
+    if (!selectedEntity || selectedEntity.kind !== 'table') return [];
+    const q = guestSearch.toLowerCase().trim();
+    return guests
+      .filter((g) => {
+        if (g.tableId === selectedEntity.id) return false;
+        if (guestScope === 'unassigned' && g.tableId) return false;
+        if (q) {
+          const matchName = g.name?.toLowerCase().includes(q);
+          const matchGroup = g.group?.toLowerCase().includes(q);
+          if (!matchName && !matchGroup) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [selectedEntity, guests, guestSearch, guestScope]);
+
+  const handleAssignGuestToSelectedTable = async (guest) => {
+    if (!selectedEntity || selectedEntity.kind !== 'table') return;
+    await updateGuest(weddingId, guest.id, { tableId: selectedEntity.id });
+    onNotify?.(`${guest.name} vinculado(a) à ${selectedEntity.name}!`);
+  };
+
+  const handleUnassignGuest = async (guest) => {
+    await updateGuest(weddingId, guest.id, { tableId: null });
+    onNotify?.(`${guest.name} removido(a) da mesa.`, 'info');
+  };
 
   const handleApplyRoomDimensions = async (e) => {
     e.preventDefault();
@@ -181,7 +235,6 @@ export default function LayoutPlanner({
     }
   };
 
-  // Arrastar Tokens (Drag)
   const handleTokenPointerDown = (e, entity, kind, defaultX, defaultY) => {
     if (tool === 'ruler') return;
     e.stopPropagation();
@@ -189,6 +242,9 @@ export default function LayoutPlanner({
     const startX = entity.x ?? defaultX;
     const startY = entity.y ?? defaultY;
     setSelected({ id: entity.id, kind });
+    if (kind === 'table') {
+      setSidebarTab('guests');
+    }
     setDragState({
       id: entity.id,
       kind,
@@ -208,7 +264,7 @@ export default function LayoutPlanner({
     let nextY = dragState.origY + dy;
 
     if (snapToGrid) {
-      const step = PX_PER_METER / 4; // 25cm
+      const step = PX_PER_METER / 4;
       nextX = Math.round(nextX / step) * step;
       nextY = Math.round(nextY / step) * step;
     }
@@ -235,7 +291,6 @@ export default function LayoutPlanner({
     }
   };
 
-  // Redimensionar Token pela alça
   const handleResizePointerDown = (e, item) => {
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -280,10 +335,10 @@ export default function LayoutPlanner({
     await onUpdateLayoutItem(id, { widthM, heightM });
   };
 
-  // Ferramenta Régua / Trena VTT
   const handleBoardPointerDown = (e) => {
     if (tool !== 'ruler') {
       setSelected(null);
+      setSidebarTab('tokens');
       return;
     }
     const rect = e.currentTarget.getBoundingClientRect();
@@ -314,7 +369,6 @@ export default function LayoutPlanner({
     return Math.hypot(dx, dy).toFixed(2);
   }, [rulerLine]);
 
-  // Exportar PNG da Planta
   const handleExportPng = () => {
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     const bg = isDark ? '#091526' : '#F4EDE2';
@@ -348,7 +402,6 @@ export default function LayoutPlanner({
     ctx.lineWidth = 2.5;
     ctx.strokeRect(0, 0, canvasW, canvasH);
 
-    // Cotas em metros
     ctx.fillStyle = fg;
     ctx.font = '10px monospace';
     ctx.textAlign = 'center';
@@ -360,7 +413,6 @@ export default function LayoutPlanner({
       ctx.fillText(`${m}m`, -8, m * PX_PER_METER + 3);
     }
 
-    // Grade 1m
     ctx.strokeStyle = border;
     ctx.lineWidth = 0.8;
     for (let x = PX_PER_METER; x < canvasW; x += PX_PER_METER) {
@@ -376,7 +428,6 @@ export default function LayoutPlanner({
       ctx.stroke();
     }
 
-    // Tokens de Estrutura e Decoração
     layoutItems.forEach((item) => {
       const w = (Number(item.widthM) || 2) * PX_PER_METER;
       const h = (Number(item.heightM) || 1.5) * PX_PER_METER;
@@ -400,7 +451,6 @@ export default function LayoutPlanner({
       ctx.restore();
     });
 
-    // Tokens de Mesas
     tables.forEach((t, idx) => {
       const defaultX = 80 + (idx % 4) * 165;
       const defaultY = 80 + Math.floor(idx / 4) * 165;
@@ -443,7 +493,7 @@ export default function LayoutPlanner({
 
   return (
     <div className="space-y-5">
-      {/* Barra 1: Gerador do Salão Vazio (Dimensões + Formato) */}
+      {/* Barra 1: Gerador do Salão Vazio */}
       <div className="bg-card border border-theme rounded-2xl p-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
         <form
           onSubmit={handleApplyRoomDimensions}
@@ -497,7 +547,7 @@ export default function LayoutPlanner({
           </button>
         </form>
 
-        {/* Barra de Ferramentas VTT (Cursor, Régua, Imã, Zoom, PNG) */}
+        {/* Barra de Ferramentas VTT */}
         <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex rounded-xl bg-subtle p-1 border border-theme">
             <button
@@ -599,7 +649,7 @@ export default function LayoutPlanner({
                   onChange={(e) =>
                     onUpdateTable(selectedEntity.id, { name: e.target.value })
                   }
-                  className="px-2.5 py-1 rounded-lg bg-primary border border-theme text-ink text-sm font-semibold w-36"
+                  className="px-2.5 py-1 rounded-lg bg-primary border border-theme text-ink text-sm font-semibold w-40"
                 />
                 <span className="text-xs text-muted">
                   ({occupancyByTable[selectedEntity.id] || 0}/{selectedEntity.capacity} lug.)
@@ -611,6 +661,17 @@ export default function LayoutPlanner({
           <div className="flex flex-wrap items-center gap-2">
             {selectedEntity.kind === 'table' && (
               <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSidebarTab('guests');
+                    setTimeout(() => guestSearchRef.current?.focus(), 50);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-accent-contrast text-xs font-semibold hover:opacity-90 cursor-pointer"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  Alocar Convidados
+                </button>
                 <button
                   type="button"
                   onClick={() =>
@@ -715,6 +776,7 @@ export default function LayoutPlanner({
                   await onDeleteLayoutItem(selectedEntity.id);
                 }
                 setSelected(null);
+                setSidebarTab('tokens');
                 onNotify?.('Token removido do mapa.');
               }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-subtle text-ink text-xs font-semibold cursor-pointer"
@@ -726,95 +788,286 @@ export default function LayoutPlanner({
         </div>
       )}
 
-      {/* Área Principal: Bandeja de Tokens VTT + Planta Arquitetônica */}
+      {/* Área Principal: Painel Lateral + Planta Arquitetônica */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
-        {/* Bandeja de Tokens */}
-        <div className="bg-card border border-theme rounded-2xl p-4 space-y-4 h-fit max-h-[760px] overflow-y-auto">
-          <div>
-            <h3 className="font-bold text-ink text-sm">2. Bandeja de Tokens</h3>
-            <p className="text-xs text-muted">
-              Clique para lançar um token no salão e arraste para posicionar:
-            </p>
-          </div>
-
-          {/* Grupo: Mesas (Sincronizadas) */}
-          <div className="space-y-1.5">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-muted">
-              Tokens de Mesas (Sincronizados)
+        <div className="bg-card border border-theme rounded-2xl p-4 space-y-4 h-fit max-h-[780px] overflow-y-auto">
+          {selectedEntity?.kind === 'table' && (
+            <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-subtle border border-theme">
+              <button
+                type="button"
+                onClick={() => setSidebarTab('guests')}
+                className={`inline-flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold cursor-pointer ${
+                  sidebarTab === 'guests' ? 'bg-accent text-accent-contrast' : 'text-ink'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                Convidados
+              </button>
+              <button
+                type="button"
+                onClick={() => setSidebarTab('tokens')}
+                className={`inline-flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold cursor-pointer ${
+                  sidebarTab === 'tokens' ? 'bg-accent text-accent-contrast' : 'text-ink'
+                }`}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Tokens
+              </button>
             </div>
-            <div className="grid grid-cols-1 gap-1.5">
-              {TABLE_TOKENS.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => handleSpawnTableToken(t)}
-                  className="flex items-center justify-between px-3 py-2 rounded-xl bg-accent text-accent-contrast text-xs font-semibold hover:opacity-90 transition cursor-pointer"
-                >
-                  <span className="inline-flex items-center gap-2">
-                    {t.shape === 'round' ? (
-                      <Circle className="w-3.5 h-3.5" />
-                    ) : (
-                      <Square className="w-3.5 h-3.5" />
+          )}
+
+          {selectedEntity?.kind === 'table' && sidebarTab === 'guests' ? (
+            <div className="space-y-4">
+              {(() => {
+                const occupied = occupancyByTable[selectedEntity.id] || 0;
+                const cap = Math.max(1, Number(selectedEntity.capacity) || 8);
+                const pct = Math.min(100, Math.round((occupied / cap) * 100));
+                const isOver = occupied > cap;
+
+                return (
+                  <div className="p-3 rounded-xl bg-subtle border border-theme space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-sm text-ink">{selectedEntity.name}</span>
+                      <span
+                        className={`text-xs font-mono font-bold ${
+                          isOver ? 'text-red-500' : 'text-ink'
+                        }`}
+                      >
+                        {occupied}/{cap} lug.
+                      </span>
+                    </div>
+                    <div className="w-full h-2 bg-card rounded-full overflow-hidden">
+                      <div
+                        className={`h-full transition-all ${
+                          isOver ? 'bg-red-500' : 'bg-accent'
+                        }`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    {isOver && (
+                      <p className="text-[11px] text-red-500 font-semibold">
+                        Atenção: mesa acima da capacidade!
+                      </p>
                     )}
-                    {t.label}
+                  </div>
+                );
+              })()}
+
+              {/* Sentados nesta Mesa */}
+              <div className="space-y-2">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-muted">
+                  Sentados nesta Mesa ({selectedTableGuests.length})
+                </div>
+
+                {selectedTableGuests.length === 0 ? (
+                  <p className="text-xs text-muted bg-primary border border-dashed border-theme rounded-xl p-3 text-center">
+                    Nenhum convidado vinculado ainda. Selecione abaixo para alocar.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-0.5">
+                    {selectedTableGuests.map((g) => {
+                      const people = (Number(g.adults) || 0) + (Number(g.children) || 0);
+                      return (
+                        <div
+                          key={g.id}
+                          className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-primary border border-theme text-xs"
+                        >
+                          <div className="min-w-0">
+                            <div className="font-semibold text-ink truncate">{g.name}</div>
+                            <div className="text-[11px] text-muted">
+                              {people} pessoa(s) • {g.group || 'Geral'}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleUnassignGuest(g)}
+                            title="Remover convidado desta mesa"
+                            className="p-1.5 rounded-lg bg-subtle hover:opacity-80 text-ink shrink-0 cursor-pointer"
+                          >
+                            <UserMinus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Vincular Novos Convidados */}
+              <div className="space-y-2.5 pt-3 border-t border-theme">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-muted">
+                    Vincular Convidados
                   </span>
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
-              ))}
-            </div>
-          </div>
+                  <div className="inline-flex rounded-lg bg-subtle p-0.5 text-[10px] font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setGuestScope('unassigned')}
+                      className={`px-2 py-0.5 rounded-md cursor-pointer ${
+                        guestScope === 'unassigned'
+                          ? 'bg-accent text-accent-contrast'
+                          : 'text-ink'
+                      }`}
+                    >
+                      Sem mesa
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGuestScope('all')}
+                      className={`px-2 py-0.5 rounded-md cursor-pointer ${
+                        guestScope === 'all' ? 'bg-accent text-accent-contrast' : 'text-ink'
+                      }`}
+                    >
+                      Todos
+                    </button>
+                  </div>
+                </div>
 
-          {/* Grupo: Estrutura da Planta */}
-          <div className="space-y-1.5 pt-2 border-t border-theme">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-muted">
-              Paredes & Estrutura
-            </div>
-            <div className="grid grid-cols-2 lg:grid-cols-1 gap-1.5">
-              {STRUCTURE_TOKENS.map((preset) => {
-                const Icon = preset.icon;
-                return (
-                  <button
-                    key={preset.type}
-                    type="button"
-                    onClick={() => handleSpawnDecorToken(preset)}
-                    className="flex items-center justify-between px-3 py-2 rounded-xl bg-subtle hover:opacity-85 text-ink text-xs font-semibold transition cursor-pointer text-left"
-                  >
-                    <span className="inline-flex items-center gap-2">
-                      <Icon className="w-3.5 h-3.5 shrink-0" />
-                      {preset.label}
-                    </span>
-                    <Plus className="w-3.5 h-3.5 shrink-0 opacity-70" />
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-muted absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    ref={guestSearchRef}
+                    type="text"
+                    placeholder="Buscar nome ou grupo..."
+                    value={guestSearch}
+                    onChange={(e) => setGuestSearch(e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs focus:outline-none"
+                  />
+                </div>
 
-          {/* Grupo: Decoração & Mobiliário */}
-          <div className="space-y-1.5 pt-2 border-t border-theme">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-muted">
-              Cerimônia, Cadeiras & Decoração
+                {availableGuestsForTable.length === 0 ? (
+                  <p className="text-xs text-muted text-center py-3">
+                    {guests.length === 0
+                      ? 'Cadastre convidados na aba Administrar Convidados primeiro.'
+                      : 'Nenhum convidado encontrado neste filtro.'}
+                  </p>
+                ) : (
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-0.5">
+                    {availableGuestsForTable.map((g) => {
+                      const people = (Number(g.adults) || 0) + (Number(g.children) || 0);
+                      const currentTableName = g.tableId ? tablesMap[g.tableId] : null;
+                      return (
+                        <div
+                          key={g.id}
+                          className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-subtle text-xs"
+                        >
+                          <div className="min-w-0">
+                            <div className="font-semibold text-ink truncate">{g.name}</div>
+                            <div className="text-[11px] text-muted truncate">
+                              {people}p • {g.group || 'Geral'}
+                              {currentTableName ? ` • ${currentTableName}` : ''}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleAssignGuestToSelectedTable(g)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-accent text-accent-contrast text-[11px] font-semibold hover:opacity-90 shrink-0 cursor-pointer"
+                          >
+                            {currentTableName ? (
+                              <>
+                                <ArrowRightLeft className="w-3 h-3" />
+                                Mover
+                              </>
+                            ) : (
+                              <>
+                                <UserPlus className="w-3 h-3" />
+                                Alocar
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="grid grid-cols-2 lg:grid-cols-1 gap-1.5">
-              {DECOR_TOKENS.map((preset) => {
-                const Icon = preset.icon;
-                return (
-                  <button
-                    key={preset.type}
-                    type="button"
-                    onClick={() => handleSpawnDecorToken(preset)}
-                    className="flex items-center justify-between px-3 py-2 rounded-xl bg-subtle hover:opacity-85 text-ink text-xs font-semibold transition cursor-pointer text-left"
-                  >
-                    <span className="inline-flex items-center gap-2">
-                      <Icon className="w-3.5 h-3.5 shrink-0" />
-                      {preset.label}
-                    </span>
-                    <Plus className="w-3.5 h-3.5 shrink-0 opacity-70" />
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          ) : (
+            <>
+              <div>
+                <h3 className="font-bold text-ink text-sm">2. Bandeja de Tokens</h3>
+                <p className="text-xs text-muted">
+                  Clique para lançar um token no salão ou clique em uma mesa no mapa para alocar convidados:
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-muted">
+                  Tokens de Mesas (Sincronizados)
+                </div>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {TABLE_TOKENS.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => handleSpawnTableToken(t)}
+                      className="flex items-center justify-between px-3 py-2 rounded-xl bg-accent text-accent-contrast text-xs font-semibold hover:opacity-90 transition cursor-pointer"
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        {t.shape === 'round' ? (
+                          <Circle className="w-3.5 h-3.5" />
+                        ) : (
+                          <Square className="w-3.5 h-3.5" />
+                        )}
+                        {t.label}
+                      </span>
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5 pt-2 border-t border-theme">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-muted">
+                  Paredes & Estrutura
+                </div>
+                <div className="grid grid-cols-2 lg:grid-cols-1 gap-1.5">
+                  {STRUCTURE_TOKENS.map((preset) => {
+                    const Icon = preset.icon;
+                    return (
+                      <button
+                        key={preset.type}
+                        type="button"
+                        onClick={() => handleSpawnDecorToken(preset)}
+                        className="flex items-center justify-between px-3 py-2 rounded-xl bg-subtle hover:opacity-85 text-ink text-xs font-semibold transition cursor-pointer text-left"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <Icon className="w-3.5 h-3.5 shrink-0" />
+                          {preset.label}
+                        </span>
+                        <Plus className="w-3.5 h-3.5 shrink-0 opacity-70" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-1.5 pt-2 border-t border-theme">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-muted">
+                  Cerimônia, Cadeiras & Decoração
+                </div>
+                <div className="grid grid-cols-2 lg:grid-cols-1 gap-1.5">
+                  {DECOR_TOKENS.map((preset) => {
+                    const Icon = preset.icon;
+                    return (
+                      <button
+                        key={preset.type}
+                        type="button"
+                        onClick={() => handleSpawnDecorToken(preset)}
+                        className="flex items-center justify-between px-3 py-2 rounded-xl bg-subtle hover:opacity-85 text-ink text-xs font-semibold transition cursor-pointer text-left"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <Icon className="w-3.5 h-3.5 shrink-0" />
+                          {preset.label}
+                        </span>
+                        <Plus className="w-3.5 h-3.5 shrink-0 opacity-70" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Tabuleiro / Planta Baixa */}
@@ -832,7 +1085,6 @@ export default function LayoutPlanner({
             </div>
           )}
 
-          {/* Wrapper com Cotas Arquitetônicas Superior e Esquerda */}
           <div
             style={{
               width: (canvasW + 32) * zoom,
@@ -849,7 +1101,6 @@ export default function LayoutPlanner({
               }}
               className="relative select-none"
             >
-              {/* Régua Superior (0m até roomWidth) */}
               <div
                 style={{ left: 32, width: canvasW }}
                 className="absolute top-0 h-6 flex items-end border-b border-theme"
@@ -865,7 +1116,6 @@ export default function LayoutPlanner({
                 ))}
               </div>
 
-              {/* Régua Lateral (0m até roomLength) */}
               <div
                 style={{ top: 28, height: canvasH }}
                 className="absolute left-0 w-7 border-r border-theme"
@@ -881,7 +1131,6 @@ export default function LayoutPlanner({
                 ))}
               </div>
 
-              {/* Área Interna do Salão */}
               <div
                 onPointerDown={handleBoardPointerDown}
                 onPointerMove={handleBoardPointerMove}
@@ -907,7 +1156,6 @@ export default function LayoutPlanner({
                 }}
                 className="absolute bg-primary border-4 border-ink rounded-lg overflow-hidden shadow-inner"
               >
-                {/* Recorte visual caso o salão seja em formato L */}
                 {roomShape === 'l-shape' && (
                   <div
                     style={{
@@ -920,7 +1168,6 @@ export default function LayoutPlanner({
                   </div>
                 )}
 
-                {/* Tokens de Estrutura e Decoração */}
                 {layoutItems.map((item) => {
                   const isDragged = draftPos && draftPos.id === item.id;
                   const isResized = draftSize && draftSize.id === item.id;
@@ -968,7 +1215,6 @@ export default function LayoutPlanner({
                         </>
                       )}
 
-                      {/* Alça de Redimensionamento no canto inferior direito */}
                       {isSelected && (
                         <div
                           onPointerDown={(e) => handleResizePointerDown(e, item)}
@@ -982,7 +1228,6 @@ export default function LayoutPlanner({
                   );
                 })}
 
-                {/* Tokens de Mesas com Cadeiras */}
                 {tables.map((table, idx) => {
                   const defaultX = 80 + (idx % 4) * 165;
                   const defaultY = 80 + Math.floor(idx / 4) * 165;
@@ -1011,11 +1256,11 @@ export default function LayoutPlanner({
                         transform: `rotate(${table.rotation || 0}deg)`,
                         touchAction: 'none',
                       }}
+                      title="Clique para alocar convidados ou arraste para mover"
                       className={`absolute flex items-center justify-center cursor-grab active:cursor-grabbing ${
                         isSelected ? 'z-30' : 'z-20'
                       }`}
                     >
-                      {/* Tokens de Cadeiras ao redor */}
                       {Array.from({ length: capacity }).map((_, seatIdx) => {
                         const isSeatOccupied = seatIdx < occupied;
                         let seatStyle = {};
@@ -1050,7 +1295,6 @@ export default function LayoutPlanner({
                         );
                       })}
 
-                      {/* Token Central da Mesa */}
                       <div
                         className={`flex flex-col items-center justify-center text-center px-2 shadow-lg transition ${
                           isRect ? 'w-28 h-14 rounded-xl' : 'w-20 h-20 rounded-full'
@@ -1071,7 +1315,6 @@ export default function LayoutPlanner({
                   );
                 })}
 
-                {/* Linha da Régua / Trena VTT */}
                 {rulerLine && (
                   <svg className="absolute inset-0 w-full h-full pointer-events-none z-40">
                     <line

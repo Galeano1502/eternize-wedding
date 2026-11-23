@@ -109,7 +109,15 @@ export async function updateWeddingInfo(weddingId, data) {
 
 export async function clearAllWeddingData(weddingId) {
   if (!db || !weddingId) return;
-  const subcollections = ['guests', 'checklist', 'budget', 'vendors', 'tables', 'layoutItems'];
+  const subcollections = [
+    'guests',
+    'checklist',
+    'budget',
+    'vendors',
+    'tables',
+    'layoutItems',
+    'gifts',
+  ];
 
   for (const sub of subcollections) {
     const snap = await getDocs(collection(db, 'weddings', weddingId, sub));

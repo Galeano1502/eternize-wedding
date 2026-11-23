@@ -9,8 +9,18 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 
-export async function addGuest(uid, guestData) {
+export function generateGuestPin(existingPins = new Set()) {
+  for (let i = 0; i < 50; i++) {
+    const candidate = String(Math.floor(1000 + Math.random() * 9000));
+    if (!existingPins.has(candidate)) return candidate;
+  }
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+
+export async function addGuest(uid, guestData, existingPins = new Set()) {
   const colRef = collection(db, 'weddings', uid, 'guests');
+  const pin = guestData.pin || generateGuestPin(existingPins);
+
   const docRef = await addDoc(colRef, {
     name: guestData.name || '',
     phone: guestData.phone || '',
@@ -24,6 +34,7 @@ export async function addGuest(uid, guestData) {
     inviteSentAt: guestData.inviteSent ? serverTimestamp() : null,
     tableId: guestData.tableId || null,
     dietary: guestData.dietary || '',
+    pin,
     createdAt: serverTimestamp(),
   });
   return docRef.id;
@@ -74,11 +85,15 @@ export async function bulkDeleteGuests(uid, guestIds) {
   await batch.commit();
 }
 
-export async function bulkImportGuests(uid, rows) {
+export async function bulkImportGuests(uid, rows, existingPins = new Set()) {
   if (!rows.length) return;
+  const usedPins = new Set(existingPins);
   const batch = writeBatch(db);
   const colRef = collection(db, 'weddings', uid, 'guests');
+
   rows.forEach((row) => {
+    const pin = generateGuestPin(usedPins);
+    usedPins.add(pin);
     const newDoc = doc(colRef);
     batch.set(newDoc, {
       name: row.name,
@@ -93,6 +108,7 @@ export async function bulkImportGuests(uid, rows) {
       inviteSentAt: null,
       tableId: null,
       dietary: row.dietary || '',
+      pin,
       createdAt: serverTimestamp(),
     });
   });
@@ -102,6 +118,7 @@ export async function bulkImportGuests(uid, rows) {
 export function exportGuestsCSV(guests, tablesMap = {}) {
   const headers = [
     'Nome',
+    'PIN de Acesso',
     'Celular/WhatsApp',
     'E-mail',
     'Grupo',
@@ -129,6 +146,7 @@ export function exportGuestsCSV(guests, tablesMap = {}) {
       const total = (Number(g.adults) || 0) + (Number(g.children) || 0);
       return [
         g.name,
+        g.pin || '-',
         g.phone,
         g.email,
         g.group,

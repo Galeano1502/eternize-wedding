@@ -1,4 +1,4 @@
-import { Users, CheckSquare, Wallet, Briefcase, LayoutGrid, Map } from 'lucide-react';
+import { Users, CheckSquare, Wallet, Briefcase, LayoutGrid, Map, Gift } from 'lucide-react';
 
 const TABS = [
   { id: 'guests', label: 'Administrar Convidados', icon: Users },
@@ -7,6 +7,7 @@ const TABS = [
   { id: 'vendors', label: 'Fornecedores', icon: Briefcase },
   { id: 'tables', label: 'Mesas', icon: LayoutGrid },
   { id: 'layout', label: 'Layout & Planta', icon: Map },
+  { id: 'gifts', label: 'Lista de Presentes', icon: Gift },
 ];
 
 export default function TabNav({ activeTab, onChangeTab, counts }) {

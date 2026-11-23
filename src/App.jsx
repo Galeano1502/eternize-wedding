@@ -22,6 +22,7 @@ import Budget from './pages/Budget';
 import Vendors from './pages/Vendors';
 import Tables from './pages/Tables';
 import LayoutPlanner from './pages/LayoutPlanner';
+import GiftRegistry from './pages/GiftRegistry';
 
 export default function App() {
   const { user, loading: authLoading, logout } = useAuth();
@@ -37,6 +38,7 @@ export default function App() {
   const vendorsCol = useCollection(weddingId, 'vendors');
   const tablesCol = useCollection(weddingId, 'tables');
   const layoutCol = useCollection(weddingId, 'layoutItems');
+  const giftsCol = useCollection(weddingId, 'gifts');
 
   const notify = (message, type = 'success') => {
     setToast({ message, type });
@@ -65,6 +67,7 @@ export default function App() {
       vendors: vendorsCol.items,
       tables: tablesCol.items,
       layoutItems: layoutCol.items,
+      gifts: giftsCol.items,
     });
     notify('Backup JSON baixado!');
   };
@@ -102,6 +105,7 @@ export default function App() {
           vendors: vendorsCol.items.length,
           tables: tablesCol.items.length,
           layout: tablesCol.items.length + layoutCol.items.length,
+          gifts: giftsCol.items.length,
         }}
       />
 
@@ -169,6 +173,16 @@ export default function App() {
             onAddLayoutItem={layoutCol.addItem}
             onUpdateLayoutItem={layoutCol.updateItem}
             onDeleteLayoutItem={layoutCol.deleteItem}
+            onNotify={notify}
+          />
+        )}
+
+        {activeTab === 'gifts' && (
+          <GiftRegistry
+            items={giftsCol.items}
+            onAdd={giftsCol.addItem}
+            onUpdate={giftsCol.updateItem}
+            onDelete={giftsCol.deleteItem}
             onNotify={notify}
           />
         )}
