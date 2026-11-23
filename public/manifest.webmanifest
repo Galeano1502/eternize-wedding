@@ -1,0 +1,25 @@
+{
+  "name": "Eternize — Planejador de Casamento",
+  "short_name": "Eternize",
+  "description": "Planejador de casamento sincronizado em tempo real para o casal.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#F4EDE2",
+  "theme_color": "#0F2342",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
