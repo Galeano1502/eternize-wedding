@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from './contexts/AuthContext';
 import { useWedding } from './hooks/useWedding';
 import { useGuests } from './hooks/useGuests';
 import { useCollection } from './hooks/useCollection';
+import { findGuestByPin } from './services/guestInviteService';
 import {
   updateWeddingInfo,
   clearAllWeddingData,
@@ -10,6 +11,7 @@ import {
 } from './services/weddingService';
 
 import Login from './pages/Login';
+import GuestPortal from './pages/GuestPortal';
 import Header from './components/layout/Header';
 import KpiCards from './components/layout/KpiCards';
 import TabNav from './components/layout/TabNav';
@@ -29,23 +31,56 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('guests');
   const [coupleModalOpen, setCoupleModalOpen] = useState(false);
   const [toast, setToast] = useState(null);
+  const [guestSession, setGuestSession] = useState(null); // { weddingId, wedding, guest }
 
   const uid = user?.uid;
-  const { wedding, weddingId, setWeddingId, loading: weddingLoading } = useWedding(uid);
-  const { guests, stats: guestStats } = useGuests(weddingId);
-  const checklistCol = useCollection(weddingId, 'checklist');
-  const budgetCol = useCollection(weddingId, 'budget');
-  const vendorsCol = useCollection(weddingId, 'vendors');
-  const tablesCol = useCollection(weddingId, 'tables');
-  const layoutCol = useCollection(weddingId, 'layoutItems');
-  const giftsCol = useCollection(weddingId, 'gifts');
+  const effectiveWeddingId = guestSession?.weddingId || null;
+
+  const { wedding, weddingId, setWeddingId, loading: weddingLoading } = useWedding(
+    guestSession ? null : uid
+  );
+
+  const activeWeddingId = guestSession ? effectiveWeddingId : weddingId;
+
+  const { guests, stats: guestStats } = useGuests(activeWeddingId);
+  const checklistCol = useCollection(guestSession ? null : activeWeddingId, 'checklist');
+  const budgetCol = useCollection(guestSession ? null : activeWeddingId, 'budget');
+  const vendorsCol = useCollection(guestSession ? null : activeWeddingId, 'vendors');
+  const tablesCol = useCollection(activeWeddingId, 'tables');
+  const layoutCol = useCollection(activeWeddingId, 'layoutItems');
+  const giftsCol = useCollection(activeWeddingId, 'gifts');
+
+  const activeWedding = guestSession
+    ? { ...wedding, ...guestSession.wedding, id: activeWeddingId }
+    : { ...wedding, id: activeWeddingId };
+
+  useEffect(() => {
+    const coupleLabel = activeWedding?.coupleNames?.trim();
+    document.title = coupleLabel
+      ? `${coupleLabel} — Eternize`
+      : 'Eternize — Planejador de Casamento';
+  }, [activeWedding?.coupleNames]);
 
   const notify = (message, type = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3500);
   };
 
-  if (authLoading || (user && weddingLoading)) {
+  const handleGuestPinLogin = async ({ pin, weddingCode }) => {
+    const result = await findGuestByPin({ pin, weddingCode });
+    setGuestSession({
+      weddingId: result.weddingId,
+      wedding: result.weddingData,
+      guest: result.guestData,
+    });
+  };
+
+  const handleGuestLogout = async () => {
+    setGuestSession(null);
+    await logout();
+  };
+
+  if (authLoading || (!guestSession && user && weddingLoading)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-primary text-ink">
         <p className="font-serif-display text-xl">Carregando Eternize...</p>
@@ -53,14 +88,36 @@ export default function App() {
     );
   }
 
+  if (guestSession) {
+    const currentGuest =
+      guests.find((g) => g.id === guestSession.guest?.id) || guestSession.guest;
+
+    return (
+      <>
+        <GuestPortal
+          wedding={activeWedding}
+          guest={currentGuest}
+          guests={guests}
+          tables={tablesCol.items}
+          layoutItems={layoutCol.items}
+          gifts={giftsCol.items}
+          onReserveGift={giftsCol.updateItem}
+          onLogout={handleGuestLogout}
+          onNotify={notify}
+        />
+        <Toast toast={toast} onClose={() => setToast(null)} />
+      </>
+    );
+  }
+
   if (!user) {
-    return <Login />;
+    return <Login onGuestPinLogin={handleGuestPinLogin} />;
   }
 
   const handleExportBackup = () => {
     downloadJsonBackup({
       exportedAt: new Date().toISOString(),
-      wedding,
+      wedding: activeWedding,
       guests,
       checklist: checklistCol.items,
       budget: budgetCol.items,
@@ -81,7 +138,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-primary text-ink pb-16">
       <Header
-        wedding={wedding}
+        wedding={activeWedding}
         onOpenCoupleModal={() => setCoupleModalOpen(true)}
         onExportBackup={handleExportBackup}
         onClearAll={handleClearAll}
@@ -113,7 +170,7 @@ export default function App() {
         {activeTab === 'guests' && (
           <GuestsAdmin
             uid={weddingId}
-            wedding={wedding}
+            wedding={activeWedding}
             guests={guests}
             stats={guestStats}
             tables={tablesCol.items}
@@ -162,7 +219,7 @@ export default function App() {
 
         {activeTab === 'layout' && (
           <LayoutPlanner
-            wedding={wedding}
+            wedding={activeWedding}
             weddingId={weddingId}
             tables={tablesCol.items}
             guests={guests}
@@ -191,7 +248,7 @@ export default function App() {
       <CoupleModal
         isOpen={coupleModalOpen}
         onClose={() => setCoupleModalOpen(false)}
-        wedding={wedding}
+        wedding={activeWedding}
         uid={uid}
         onJoinedWedding={(newId) => {
           setWeddingId(newId);

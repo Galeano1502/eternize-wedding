@@ -12,6 +12,7 @@ import {
   Clock,
   X,
   Upload,
+  BookmarkCheck,
 } from 'lucide-react';
 import EmptyState from '../components/ui/EmptyState';
 import { formatCurrency } from '../utils/formatters';
@@ -77,7 +78,15 @@ function GiftCardImage({ src, alt }) {
   );
 }
 
-export default function GiftRegistry({ items = [], onAdd, onUpdate, onDelete, onNotify }) {
+export default function GiftRegistry({
+  items = [],
+  readOnly = false,
+  guestName = '',
+  onAdd,
+  onUpdate,
+  onDelete,
+  onNotify,
+}) {
   const [form, setForm] = useState({
     title: '',
     imageUrl: '',
@@ -88,6 +97,7 @@ export default function GiftRegistry({ items = [], onAdd, onUpdate, onDelete, on
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('todos');
+  const [reservingId, setReservingId] = useState(null);
   const [editingGift, setEditingGift] = useState(null);
   const [editForm, setEditForm] = useState({
     title: '',
@@ -101,9 +111,9 @@ export default function GiftRegistry({ items = [], onAdd, onUpdate, onDelete, on
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    if (!form.title.trim()) return;
+    if (readOnly || !form.title.trim()) return;
 
-    await onAdd({
+    await onAdd?.({
       title: form.title.trim(),
       imageUrl: form.imageUrl.trim(),
       link: normalizeUrl(form.link),
@@ -124,6 +134,7 @@ export default function GiftRegistry({ items = [], onAdd, onUpdate, onDelete, on
   };
 
   const handleFileUpload = async (e, isEdit = false) => {
+    if (readOnly) return;
     const file = e.target.files?.[0];
     if (!file) return;
     try {
@@ -140,6 +151,7 @@ export default function GiftRegistry({ items = [], onAdd, onUpdate, onDelete, on
   };
 
   const openEditModal = (gift) => {
+    if (readOnly) return;
     setEditingGift(gift);
     setEditForm({
       title: gift.title || '',
@@ -154,9 +166,9 @@ export default function GiftRegistry({ items = [], onAdd, onUpdate, onDelete, on
 
   const handleSaveEdit = async (e) => {
     e.preventDefault();
-    if (!editingGift || !editForm.title.trim()) return;
+    if (readOnly || !editingGift || !editForm.title.trim()) return;
 
-    await onUpdate(editingGift.id, {
+    await onUpdate?.(editingGift.id, {
       title: editForm.title.trim(),
       imageUrl: editForm.imageUrl.trim(),
       link: normalizeUrl(editForm.link),
@@ -171,6 +183,7 @@ export default function GiftRegistry({ items = [], onAdd, onUpdate, onDelete, on
   };
 
   const handleCycleStatus = async (gift) => {
+    if (readOnly) return;
     const nextStatus =
       gift.status === 'disponivel'
         ? 'reservado'
@@ -178,7 +191,7 @@ export default function GiftRegistry({ items = [], onAdd, onUpdate, onDelete, on
         ? 'comprado'
         : 'disponivel';
 
-    await onUpdate(gift.id, {
+    await onUpdate?.(gift.id, {
       status: nextStatus,
       reservedBy: nextStatus === 'disponivel' ? '' : gift.reservedBy || '',
     });
@@ -191,6 +204,20 @@ export default function GiftRegistry({ items = [], onAdd, onUpdate, onDelete, on
           : 'Comprado'
       }.`
     );
+  };
+
+  const handleGuestReserve = async (gift) => {
+    if (!gift?.id || (gift.status || 'disponivel') !== 'disponivel') return;
+    setReservingId(gift.id);
+    try {
+      await onUpdate?.(gift.id, {
+        status: 'reservado',
+        reservedBy: (guestName || 'Convidado').trim(),
+      });
+      onNotify?.(`Você reservou "${gift.title}"!`);
+    } finally {
+      setReservingId(null);
+    }
   };
 
   const stats = useMemo(() => {
@@ -221,105 +248,109 @@ export default function GiftRegistry({ items = [], onAdd, onUpdate, onDelete, on
       <div>
         <h2 className="text-2xl font-bold text-ink">Lista de Presentes</h2>
         <p className="text-sm text-muted">
-          Cadastre itens com foto, título e link da loja. Você pode editar qualquer detalhe a qualquer momento.
+          {readOnly
+            ? 'Consulte os itens da lista e reserve um presente disponível para o casal.'
+            : 'Cadastre itens com foto, título e link da loja. Você pode editar qualquer detalhe a qualquer momento.'}
         </p>
       </div>
 
-      {/* Formulário de Novo Presente */}
-      <form
-        onSubmit={handleCreate}
-        className="bg-card border border-theme rounded-2xl p-4 space-y-3"
-      >
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          <input
-            type="text"
-            required
-            placeholder="Título do presente (ex: Cafeteira Expresso)"
-            value={form.title}
-            onChange={(e) => setForm({ ...form, title: e.target.value })}
-            className="lg:col-span-2 px-3.5 py-2.5 rounded-xl bg-primary border border-theme text-ink text-sm focus:outline-none"
-          />
+      {/* Formulário de Novo Presente (apenas administradores) */}
+      {!readOnly && (
+        <form
+          onSubmit={handleCreate}
+          className="bg-card border border-theme rounded-2xl p-4 space-y-3"
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            <input
+              type="text"
+              required
+              placeholder="Título do presente (ex: Cafeteira Expresso)"
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              className="lg:col-span-2 px-3.5 py-2.5 rounded-xl bg-primary border border-theme text-ink text-sm focus:outline-none"
+            />
 
-          <div className="flex items-center gap-1.5">
-            <div className="relative flex-1">
-              <ImageIcon className="w-4 h-4 text-muted absolute left-3 top-1/2 -translate-y-1/2" />
+            <div className="flex items-center gap-1.5">
+              <div className="relative flex-1">
+                <ImageIcon className="w-4 h-4 text-muted absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="URL da imagem ou envie foto ->"
+                  value={form.imageUrl}
+                  onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
+                  className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-primary border border-theme text-ink text-sm focus:outline-none"
+                />
+              </div>
+              <label
+                title="Carregar imagem do dispositivo"
+                className="p-2.5 rounded-xl bg-subtle border border-theme text-ink hover:opacity-85 cursor-pointer shrink-0"
+              >
+                <Upload className="w-4 h-4" />
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleFileUpload(e, false)}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            <div className="relative">
+              <Link2 className="w-4 h-4 text-muted absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="URL da imagem ou envie foto ->"
-                value={form.imageUrl}
-                onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
+                placeholder="Link da loja / compra"
+                value={form.link}
+                onChange={(e) => setForm({ ...form, link: e.target.value })}
                 className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-primary border border-theme text-ink text-sm focus:outline-none"
               />
             </div>
-            <label
-              title="Carregar imagem do dispositivo"
-              className="p-2.5 rounded-xl bg-subtle border border-theme text-ink hover:opacity-85 cursor-pointer shrink-0"
+
+            <button
+              type="submit"
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-accent text-accent-contrast text-sm font-semibold hover:opacity-90 cursor-pointer"
             >
-              <Upload className="w-4 h-4" />
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => handleFileUpload(e, false)}
-                className="hidden"
-              />
-            </label>
+              <Plus className="w-4 h-4" />
+              Adicionar
+            </button>
           </div>
 
-          <div className="relative">
-            <Link2 className="w-4 h-4 text-muted absolute left-3 top-1/2 -translate-y-1/2" />
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <select
+              value={form.category}
+              onChange={(e) => setForm({ ...form, category: e.target.value })}
+              className="px-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs font-semibold focus:outline-none"
+            >
+              {GIFT_CATEGORIES.map((cat) => (
+                <option key={cat} value={cat}>
+                  Categoria: {cat}
+                </option>
+              ))}
+            </select>
+
             <input
-              type="text"
-              placeholder="Link da loja / compra"
-              value={form.link}
-              onChange={(e) => setForm({ ...form, link: e.target.value })}
-              className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-primary border border-theme text-ink text-sm focus:outline-none"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="Valor estimado R$ (opcional)"
+              value={form.price}
+              onChange={(e) => setForm({ ...form, price: e.target.value })}
+              className="w-52 px-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs focus:outline-none"
             />
+
+            {form.imageUrl && (
+              <div className="flex items-center gap-2 text-xs text-muted">
+                <img
+                  src={form.imageUrl}
+                  alt="Prévia"
+                  className="w-8 h-8 rounded-lg object-cover border border-theme"
+                />
+                <span>Prévia da imagem pronta</span>
+              </div>
+            )}
           </div>
-
-          <button
-            type="submit"
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-accent text-accent-contrast text-sm font-semibold hover:opacity-90 cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            Adicionar
-          </button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 pt-1">
-          <select
-            value={form.category}
-            onChange={(e) => setForm({ ...form, category: e.target.value })}
-            className="px-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs font-semibold focus:outline-none"
-          >
-            {GIFT_CATEGORIES.map((cat) => (
-              <option key={cat} value={cat}>
-                Categoria: {cat}
-              </option>
-            ))}
-          </select>
-
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            placeholder="Valor estimado R$ (opcional)"
-            value={form.price}
-            onChange={(e) => setForm({ ...form, price: e.target.value })}
-            className="w-52 px-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs focus:outline-none"
-          />
-
-          {form.imageUrl && (
-            <div className="flex items-center gap-2 text-xs text-muted">
-              <img
-                src={form.imageUrl}
-                alt="Prévia"
-                className="w-8 h-8 rounded-lg object-cover border border-theme"
-              />
-              <span>Prévia da imagem pronta</span>
-            </div>
-          )}
-        </div>
-      </form>
+        </form>
+      )}
 
       {/* Resumo e Filtros */}
       {items.length > 0 && (
@@ -378,7 +409,11 @@ export default function GiftRegistry({ items = [], onAdd, onUpdate, onDelete, on
         <EmptyState
           icon={Gift}
           title="Nenhum presente cadastrado ainda"
-          description="Adicione itens acima com foto, título e link da loja para montar sua lista de presentes."
+          description={
+            readOnly
+              ? 'Os noivos ainda não adicionaram itens à lista de presentes.'
+              : 'Adicione itens acima com foto, título e link da loja para montar sua lista de presentes.'
+          }
         />
       ) : filteredItems.length === 0 ? (
         <div className="bg-card border border-theme rounded-2xl p-8 text-center text-sm text-muted">
@@ -398,30 +433,54 @@ export default function GiftRegistry({ items = [], onAdd, onUpdate, onDelete, on
                 <div>
                   <div className="relative">
                     <GiftCardImage key={gift.imageUrl} src={gift.imageUrl} alt={gift.title} />
-                    <button
-                      type="button"
-                      onClick={() => handleCycleStatus(gift)}
-                      title="Clique para alternar status"
-                      className={`absolute top-3 right-3 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold shadow cursor-pointer ${
-                        isAvailable
-                          ? 'bg-card/95 text-ink border border-theme'
-                          : 'bg-accent text-accent-contrast'
-                      }`}
-                    >
-                      {isAvailable ? (
-                        <>
-                          <Clock className="w-3 h-3" /> Disponível
-                        </>
-                      ) : status === 'reservado' ? (
-                        <>
-                          <CheckCircle2 className="w-3 h-3" /> Reservado
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-3 h-3" /> Comprado
-                        </>
-                      )}
-                    </button>
+                    {readOnly ? (
+                      <span
+                        className={`absolute top-3 right-3 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold shadow ${
+                          isAvailable
+                            ? 'bg-card/95 text-ink border border-theme'
+                            : 'bg-accent text-accent-contrast'
+                        }`}
+                      >
+                        {isAvailable ? (
+                          <>
+                            <Clock className="w-3 h-3" /> Disponível
+                          </>
+                        ) : status === 'reservado' ? (
+                          <>
+                            <CheckCircle2 className="w-3 h-3" /> Reservado
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-3 h-3" /> Comprado
+                          </>
+                        )}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleCycleStatus(gift)}
+                        title="Clique para alternar status"
+                        className={`absolute top-3 right-3 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold shadow cursor-pointer ${
+                          isAvailable
+                            ? 'bg-card/95 text-ink border border-theme'
+                            : 'bg-accent text-accent-contrast'
+                        }`}
+                      >
+                        {isAvailable ? (
+                          <>
+                            <Clock className="w-3 h-3" /> Disponível
+                          </>
+                        ) : status === 'reservado' ? (
+                          <>
+                            <CheckCircle2 className="w-3 h-3" /> Reservado
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-3 h-3" /> Comprado
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
 
                   <div className="p-4 space-y-1.5">
@@ -454,7 +513,7 @@ export default function GiftRegistry({ items = [], onAdd, onUpdate, onDelete, on
                       href={gift.link}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-accent text-accent-contrast text-xs font-semibold hover:opacity-90"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-subtle text-ink border border-theme text-xs font-semibold hover:opacity-85"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
                       Ver na Loja
@@ -463,28 +522,42 @@ export default function GiftRegistry({ items = [], onAdd, onUpdate, onDelete, on
                     <span className="text-[11px] text-muted">Sem link</span>
                   )}
 
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => openEditModal(gift)}
-                      title="Editar título, imagem ou link"
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-subtle text-ink text-xs font-semibold hover:opacity-85 cursor-pointer"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                      Editar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onDelete(gift.id);
-                        onNotify?.('Presente removido da lista.');
-                      }}
-                      title="Excluir presente"
-                      className="p-1.5 rounded-xl bg-subtle text-ink hover:opacity-85 cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                  {readOnly ? (
+                    isAvailable && (
+                      <button
+                        type="button"
+                        disabled={reservingId === gift.id}
+                        onClick={() => handleGuestReserve(gift)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-accent text-accent-contrast text-xs font-semibold hover:opacity-90 cursor-pointer disabled:opacity-60"
+                      >
+                        <BookmarkCheck className="w-3.5 h-3.5" />
+                        {reservingId === gift.id ? 'Reservando...' : 'Reservar'}
+                      </button>
+                    )
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(gift)}
+                        title="Editar título, imagem ou link"
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-subtle text-ink text-xs font-semibold hover:opacity-85 cursor-pointer"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onDelete?.(gift.id);
+                          onNotify?.('Presente removido da lista.');
+                        }}
+                        title="Excluir presente"
+                        className="p-1.5 rounded-xl bg-subtle text-ink hover:opacity-85 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -492,8 +565,8 @@ export default function GiftRegistry({ items = [], onAdd, onUpdate, onDelete, on
         </div>
       )}
 
-      {/* Modal de Edição Completa do Presente */}
-      {editingGift && (
+      {/* Modal de Edição Completa do Presente (apenas administradores) */}
+      {!readOnly && editingGift && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-card border border-theme rounded-2xl max-w-lg w-full p-6 shadow-2xl my-8">
             <div className="flex items-center justify-between mb-4">

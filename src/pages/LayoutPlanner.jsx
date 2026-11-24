@@ -65,6 +65,8 @@ export default function LayoutPlanner({
   tables = [],
   guests = [],
   layoutItems = [],
+  readOnly = false,
+  highlightTableId = null,
   onAddTable,
   onUpdateTable,
   onDeleteTable,
@@ -101,6 +103,14 @@ export default function LayoutPlanner({
     setDraftLength(roomLength);
   }, [roomWidth, roomLength]);
 
+  useEffect(() => {
+    if (readOnly) {
+      setTool('select');
+      setSelected(null);
+      setRulerLine(null);
+    }
+  }, [readOnly]);
+
   const canvasW = roomWidth * PX_PER_METER;
   const canvasH = roomLength * PX_PER_METER;
   const areaM2 =
@@ -127,14 +137,14 @@ export default function LayoutPlanner({
   }, [guests]);
 
   const selectedEntity = useMemo(() => {
-    if (!selected) return null;
+    if (readOnly || !selected) return null;
     if (selected.kind === 'table') {
       const found = tables.find((t) => t.id === selected.id);
       return found ? { ...found, kind: 'table' } : null;
     }
     const found = layoutItems.find((i) => i.id === selected.id);
     return found ? { ...found, kind: 'item' } : null;
-  }, [selected, tables, layoutItems]);
+  }, [readOnly, selected, tables, layoutItems]);
 
   const selectedTableGuests = useMemo(() => {
     if (!selectedEntity || selectedEntity.kind !== 'table') return [];
@@ -161,18 +171,20 @@ export default function LayoutPlanner({
   }, [selectedEntity, guests, guestSearch, guestScope]);
 
   const handleAssignGuestToSelectedTable = async (guest) => {
-    if (!selectedEntity || selectedEntity.kind !== 'table') return;
+    if (readOnly || !selectedEntity || selectedEntity.kind !== 'table') return;
     await updateGuest(weddingId, guest.id, { tableId: selectedEntity.id });
     onNotify?.(`${guest.name} vinculado(a) à ${selectedEntity.name}!`);
   };
 
   const handleUnassignGuest = async (guest) => {
+    if (readOnly) return;
     await updateGuest(weddingId, guest.id, { tableId: null });
     onNotify?.(`${guest.name} removido(a) da mesa.`, 'info');
   };
 
   const handleApplyRoomDimensions = async (e) => {
     e.preventDefault();
+    if (readOnly) return;
     const w = Math.min(60, Math.max(4, Number(draftWidth) || 18));
     const l = Math.min(60, Math.max(4, Number(draftLength) || 12));
     await updateWeddingInfo(weddingId, { roomWidth: w, roomLength: l });
@@ -180,9 +192,10 @@ export default function LayoutPlanner({
   };
 
   const handleSpawnTableToken = async (preset) => {
+    if (readOnly) return;
     const nextNum = tables.length + 1;
     const offset = (tables.length % 5) * 32;
-    await onAddTable({
+    await onAddTable?.({
       name: `Mesa ${String(nextNum).padStart(2, '0')}`,
       capacity: preset.capacity,
       shape: preset.shape,
@@ -195,8 +208,9 @@ export default function LayoutPlanner({
   };
 
   const handleSpawnDecorToken = async (preset) => {
+    if (readOnly) return;
     const offset = (layoutItems.length % 6) * 24;
-    await onAddLayoutItem({
+    await onAddLayoutItem?.({
       type: preset.type,
       label: preset.label,
       widthM: preset.widthM,
@@ -210,9 +224,9 @@ export default function LayoutPlanner({
   };
 
   const handleDuplicateSelected = async () => {
-    if (!selectedEntity) return;
+    if (readOnly || !selectedEntity) return;
     if (selectedEntity.kind === 'item') {
-      await onAddLayoutItem({
+      await onAddLayoutItem?.({
         type: selectedEntity.type,
         label: selectedEntity.label,
         widthM: selectedEntity.widthM || 2,
@@ -223,7 +237,7 @@ export default function LayoutPlanner({
       });
       onNotify?.('Token duplicado!');
     } else {
-      await onAddTable({
+      await onAddTable?.({
         name: `${selectedEntity.name} (Cópia)`,
         capacity: selectedEntity.capacity || 8,
         shape: selectedEntity.shape || 'round',
@@ -236,7 +250,7 @@ export default function LayoutPlanner({
   };
 
   const handleTokenPointerDown = (e, entity, kind, defaultX, defaultY) => {
-    if (tool === 'ruler') return;
+    if (readOnly || tool === 'ruler') return;
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
     const startX = entity.x ?? defaultX;
@@ -257,7 +271,7 @@ export default function LayoutPlanner({
   };
 
   const handleTokenPointerMove = (e) => {
-    if (!dragState) return;
+    if (readOnly || !dragState) return;
     const dx = (e.clientX - dragState.startClientX) / zoom;
     const dy = (e.clientY - dragState.startClientY) / zoom;
     let nextX = dragState.origX + dx;
@@ -275,7 +289,7 @@ export default function LayoutPlanner({
   };
 
   const handleTokenPointerUp = async () => {
-    if (!dragState || !draftPos) {
+    if (readOnly || !dragState || !draftPos) {
       setDragState(null);
       return;
     }
@@ -285,13 +299,14 @@ export default function LayoutPlanner({
     setDraftPos(null);
 
     if (kind === 'table') {
-      await onUpdateTable(id, { x, y });
+      await onUpdateTable?.(id, { x, y });
     } else {
-      await onUpdateLayoutItem(id, { x, y });
+      await onUpdateLayoutItem?.(id, { x, y });
     }
   };
 
   const handleResizePointerDown = (e, item) => {
+    if (readOnly) return;
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
     setResizeState({
@@ -309,7 +324,7 @@ export default function LayoutPlanner({
   };
 
   const handleResizePointerMove = (e) => {
-    if (!resizeState) return;
+    if (readOnly || !resizeState) return;
     const dwMeters = (e.clientX - resizeState.startClientX) / (PX_PER_METER * zoom);
     const dhMeters = (e.clientY - resizeState.startClientY) / (PX_PER_METER * zoom);
     const step = 0.25;
@@ -325,18 +340,18 @@ export default function LayoutPlanner({
   };
 
   const handleResizePointerUp = async () => {
-    if (!resizeState || !draftSize) {
+    if (readOnly || !resizeState || !draftSize) {
       setResizeState(null);
       return;
     }
     const { id, widthM, heightM } = draftSize;
     setResizeState(null);
     setDraftSize(null);
-    await onUpdateLayoutItem(id, { widthM, heightM });
+    await onUpdateLayoutItem?.(id, { widthM, heightM });
   };
 
   const handleBoardPointerDown = (e) => {
-    if (tool !== 'ruler') {
+    if (readOnly || tool !== 'ruler') {
       setSelected(null);
       setSidebarTab('tokens');
       return;
@@ -349,7 +364,7 @@ export default function LayoutPlanner({
   };
 
   const handleBoardPointerMove = (e) => {
-    if (!rulerLine?.active) return;
+    if (readOnly || !rulerLine?.active) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = Math.max(0, Math.min(canvasW, (e.clientX - rect.left) / zoom));
     const y = Math.max(0, Math.min(canvasH, (e.clientY - rect.top) / zoom));
@@ -357,9 +372,8 @@ export default function LayoutPlanner({
   };
 
   const handleBoardPointerUp = () => {
-    if (rulerLine?.active) {
-      setRulerLine((prev) => ({ ...prev, active: false }));
-    }
+    if (readOnly || !rulerLine?.active) return;
+    setRulerLine((prev) => ({ ...prev, active: false }));
   };
 
   const rulerDistanceMeters = useMemo(() => {
@@ -493,140 +507,142 @@ export default function LayoutPlanner({
 
   return (
     <div className="space-y-5">
-      {/* Barra 1: Gerador do Salão Vazio */}
-      <div className="bg-card border border-theme rounded-2xl p-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-        <form
-          onSubmit={handleApplyRoomDimensions}
-          className="flex flex-wrap items-center gap-3"
-        >
-          <div>
-            <span className="text-xs font-bold uppercase tracking-wider text-ink block">
-              1. Configurar Salão Vazio
-            </span>
-            <span className="text-[11px] text-muted">
-              Área útil: <strong>{areaM2} m²</strong> (1 quadrado = 1m × 1m)
-            </span>
-          </div>
-
-          <div className="flex items-center gap-1.5 bg-primary px-3 py-1.5 rounded-xl border border-theme text-xs">
-            <span className="text-muted">Largura:</span>
-            <input
-              type="number"
-              min="4"
-              max="60"
-              value={draftWidth}
-              onChange={(e) => setDraftWidth(e.target.value)}
-              className="w-12 bg-transparent font-bold text-ink text-center focus:outline-none"
-            />
-            <span className="text-muted">m × Comp.:</span>
-            <input
-              type="number"
-              min="4"
-              max="60"
-              value={draftLength}
-              onChange={(e) => setDraftLength(e.target.value)}
-              className="w-12 bg-transparent font-bold text-ink text-center focus:outline-none"
-            />
-            <span className="text-muted">m</span>
-          </div>
-
-          <select
-            value={roomShape}
-            onChange={(e) => updateWeddingInfo(weddingId, { roomShape: e.target.value })}
-            className="px-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs font-semibold focus:outline-none"
+      {/* Barra 1: Gerador do Salão Vazio (apenas administradores) */}
+      {!readOnly && (
+        <div className="bg-card border border-theme rounded-2xl p-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+          <form
+            onSubmit={handleApplyRoomDimensions}
+            className="flex flex-wrap items-center gap-3"
           >
-            <option value="rect">Formato: Retangular</option>
-            <option value="l-shape">Formato: Salão em L</option>
-          </select>
+            <div>
+              <span className="text-xs font-bold uppercase tracking-wider text-ink block">
+                1. Configurar Salão Vazio
+              </span>
+              <span className="text-[11px] text-muted">
+                Área útil: <strong>{areaM2} m²</strong> (1 quadrado = 1m × 1m)
+              </span>
+            </div>
 
-          <button
-            type="submit"
-            className="px-4 py-2 rounded-xl bg-accent text-accent-contrast text-xs font-semibold hover:opacity-90 cursor-pointer"
-          >
-            Gerar Salão
-          </button>
-        </form>
+            <div className="flex items-center gap-1.5 bg-primary px-3 py-1.5 rounded-xl border border-theme text-xs">
+              <span className="text-muted">Largura:</span>
+              <input
+                type="number"
+                min="4"
+                max="60"
+                value={draftWidth}
+                onChange={(e) => setDraftWidth(e.target.value)}
+                className="w-12 bg-transparent font-bold text-ink text-center focus:outline-none"
+              />
+              <span className="text-muted">m × Comp.:</span>
+              <input
+                type="number"
+                min="4"
+                max="60"
+                value={draftLength}
+                onChange={(e) => setDraftLength(e.target.value)}
+                className="w-12 bg-transparent font-bold text-ink text-center focus:outline-none"
+              />
+              <span className="text-muted">m</span>
+            </div>
 
-        {/* Barra de Ferramentas VTT */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-xl bg-subtle p-1 border border-theme">
+            <select
+              value={roomShape}
+              onChange={(e) => updateWeddingInfo(weddingId, { roomShape: e.target.value })}
+              className="px-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs font-semibold focus:outline-none"
+            >
+              <option value="rect">Formato: Retangular</option>
+              <option value="l-shape">Formato: Salão em L</option>
+            </select>
+
+            <button
+              type="submit"
+              className="px-4 py-2 rounded-xl bg-accent text-accent-contrast text-xs font-semibold hover:opacity-90 cursor-pointer"
+            >
+              Gerar Salão
+            </button>
+          </form>
+
+          {/* Barra de Ferramentas VTT */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-xl bg-subtle p-1 border border-theme">
+              <button
+                type="button"
+                onClick={() => {
+                  setTool('select');
+                  setRulerLine(null);
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
+                  tool === 'select' ? 'bg-accent text-accent-contrast' : 'text-ink'
+                }`}
+              >
+                <MousePointer2 className="w-3.5 h-3.5" />
+                Tokens
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTool('ruler');
+                  setSelected(null);
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
+                  tool === 'ruler' ? 'bg-accent text-accent-contrast' : 'text-ink'
+                }`}
+              >
+                <Ruler className="w-3.5 h-3.5" />
+                Medir (Régua)
+              </button>
+            </div>
+
             <button
               type="button"
-              onClick={() => {
-                setTool('select');
-                setRulerLine(null);
-              }}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
-                tool === 'select' ? 'bg-accent text-accent-contrast' : 'text-ink'
+              onClick={() => setSnapToGrid((s) => !s)}
+              className={`px-3 py-2 rounded-xl text-xs font-semibold border border-theme cursor-pointer ${
+                snapToGrid ? 'bg-subtle text-ink' : 'bg-primary text-muted'
               }`}
             >
-              <MousePointer2 className="w-3.5 h-3.5" />
-              Tokens
+              Imã {snapToGrid ? 'ON' : 'OFF'}
             </button>
+
             <button
               type="button"
-              onClick={() => {
-                setTool('ruler');
-                setSelected(null);
-              }}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
-                tool === 'ruler' ? 'bg-accent text-accent-contrast' : 'text-ink'
-              }`}
+              onClick={() => setShowSubGrid((g) => !g)}
+              className="px-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs font-semibold cursor-pointer"
             >
-              <Ruler className="w-3.5 h-3.5" />
-              Medir (Régua)
+              Grade {showSubGrid ? '0,5m' : '1m'}
+            </button>
+
+            <div className="inline-flex items-center rounded-xl bg-primary border border-theme p-1">
+              <button
+                type="button"
+                onClick={() => setZoom((z) => Math.max(0.5, Number((z - 0.1).toFixed(1))))}
+                className="p-1.5 rounded-lg hover:bg-subtle text-ink cursor-pointer"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+              <span className="px-2 text-xs font-bold text-ink">{Math.round(zoom * 100)}%</span>
+              <button
+                type="button"
+                onClick={() => setZoom((z) => Math.min(1.6, Number((z + 0.1).toFixed(1))))}
+                className="p-1.5 rounded-lg hover:bg-subtle text-ink cursor-pointer"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleExportPng}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-accent text-accent-contrast text-xs font-semibold hover:opacity-90 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              PNG
             </button>
           </div>
-
-          <button
-            type="button"
-            onClick={() => setSnapToGrid((s) => !s)}
-            className={`px-3 py-2 rounded-xl text-xs font-semibold border border-theme cursor-pointer ${
-              snapToGrid ? 'bg-subtle text-ink' : 'bg-primary text-muted'
-            }`}
-          >
-            Imã {snapToGrid ? 'ON' : 'OFF'}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setShowSubGrid((g) => !g)}
-            className="px-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs font-semibold cursor-pointer"
-          >
-            Grade {showSubGrid ? '0,5m' : '1m'}
-          </button>
-
-          <div className="inline-flex items-center rounded-xl bg-primary border border-theme p-1">
-            <button
-              type="button"
-              onClick={() => setZoom((z) => Math.max(0.5, Number((z - 0.1).toFixed(1))))}
-              className="p-1.5 rounded-lg hover:bg-subtle text-ink cursor-pointer"
-            >
-              <ZoomOut className="w-3.5 h-3.5" />
-            </button>
-            <span className="px-2 text-xs font-bold text-ink">{Math.round(zoom * 100)}%</span>
-            <button
-              type="button"
-              onClick={() => setZoom((z) => Math.min(1.6, Number((z + 0.1).toFixed(1))))}
-              className="p-1.5 rounded-lg hover:bg-subtle text-ink cursor-pointer"
-            >
-              <ZoomIn className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleExportPng}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-accent text-accent-contrast text-xs font-semibold hover:opacity-90 cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5" />
-            PNG
-          </button>
         </div>
-      </div>
+      )}
 
-      {/* Inspetor Rápido do Token Selecionado */}
-      {selectedEntity && (
+      {/* Inspetor Rápido do Token Selecionado (apenas administradores) */}
+      {!readOnly && selectedEntity && (
         <div className="bg-card border border-theme rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <span className="px-2.5 py-1 rounded-lg bg-accent text-accent-contrast text-xs font-bold uppercase">
@@ -637,7 +653,7 @@ export default function LayoutPlanner({
                 type="text"
                 value={selectedEntity.label}
                 onChange={(e) =>
-                  onUpdateLayoutItem(selectedEntity.id, { label: e.target.value })
+                  onUpdateLayoutItem?.(selectedEntity.id, { label: e.target.value })
                 }
                 className="px-2.5 py-1 rounded-lg bg-primary border border-theme text-ink text-sm font-semibold"
               />
@@ -647,7 +663,7 @@ export default function LayoutPlanner({
                   type="text"
                   value={selectedEntity.name}
                   onChange={(e) =>
-                    onUpdateTable(selectedEntity.id, { name: e.target.value })
+                    onUpdateTable?.(selectedEntity.id, { name: e.target.value })
                   }
                   className="px-2.5 py-1 rounded-lg bg-primary border border-theme text-ink text-sm font-semibold w-40"
                 />
@@ -675,7 +691,7 @@ export default function LayoutPlanner({
                 <button
                   type="button"
                   onClick={() =>
-                    onUpdateTable(selectedEntity.id, {
+                    onUpdateTable?.(selectedEntity.id, {
                       shape: selectedEntity.shape === 'rect' ? 'round' : 'rect',
                     })
                   }
@@ -699,7 +715,7 @@ export default function LayoutPlanner({
                     max="24"
                     value={selectedEntity.capacity || 8}
                     onChange={(e) =>
-                      onUpdateTable(selectedEntity.id, {
+                      onUpdateTable?.(selectedEntity.id, {
                         capacity: Number(e.target.value) || 8,
                       })
                     }
@@ -719,7 +735,7 @@ export default function LayoutPlanner({
                   max="30"
                   value={selectedEntity.widthM || 2}
                   onChange={(e) =>
-                    onUpdateLayoutItem(selectedEntity.id, {
+                    onUpdateLayoutItem?.(selectedEntity.id, {
                       widthM: Number(e.target.value) || 1,
                     })
                   }
@@ -733,7 +749,7 @@ export default function LayoutPlanner({
                   max="30"
                   value={selectedEntity.heightM || 1.5}
                   onChange={(e) =>
-                    onUpdateLayoutItem(selectedEntity.id, {
+                    onUpdateLayoutItem?.(selectedEntity.id, {
                       heightM: Number(e.target.value) || 1,
                     })
                   }
@@ -747,9 +763,9 @@ export default function LayoutPlanner({
               onClick={() => {
                 const nextRot = ((selectedEntity.rotation || 0) + 45) % 360;
                 if (selectedEntity.kind === 'table') {
-                  onUpdateTable(selectedEntity.id, { rotation: nextRot });
+                  onUpdateTable?.(selectedEntity.id, { rotation: nextRot });
                 } else {
-                  onUpdateLayoutItem(selectedEntity.id, { rotation: nextRot });
+                  onUpdateLayoutItem?.(selectedEntity.id, { rotation: nextRot });
                 }
               }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-subtle text-ink text-xs font-semibold cursor-pointer"
@@ -771,9 +787,9 @@ export default function LayoutPlanner({
               type="button"
               onClick={async () => {
                 if (selectedEntity.kind === 'table') {
-                  await onDeleteTable(selectedEntity.id);
+                  await onDeleteTable?.(selectedEntity.id);
                 } else {
-                  await onDeleteLayoutItem(selectedEntity.id);
+                  await onDeleteLayoutItem?.(selectedEntity.id);
                 }
                 setSelected(null);
                 setSidebarTab('tokens');
@@ -788,291 +804,320 @@ export default function LayoutPlanner({
         </div>
       )}
 
-      {/* Área Principal: Painel Lateral + Planta Arquitetônica */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
-        <div className="bg-card border border-theme rounded-2xl p-4 space-y-4 h-fit max-h-[780px] overflow-y-auto">
-          {selectedEntity?.kind === 'table' && (
-            <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-subtle border border-theme">
-              <button
-                type="button"
-                onClick={() => setSidebarTab('guests')}
-                className={`inline-flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold cursor-pointer ${
-                  sidebarTab === 'guests' ? 'bg-accent text-accent-contrast' : 'text-ink'
-                }`}
-              >
-                <Users className="w-3.5 h-3.5" />
-                Convidados
-              </button>
-              <button
-                type="button"
-                onClick={() => setSidebarTab('tokens')}
-                className={`inline-flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold cursor-pointer ${
-                  sidebarTab === 'tokens' ? 'bg-accent text-accent-contrast' : 'text-ink'
-                }`}
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Tokens
-              </button>
-            </div>
-          )}
+      {/* Área Principal: Bandeja Lateral (apenas ADM) + Planta Arquitetônica */}
+      <div className={`grid grid-cols-1 ${readOnly ? '' : 'lg:grid-cols-4'} gap-5`}>
+        {!readOnly && (
+          <div className="bg-card border border-theme rounded-2xl p-4 space-y-4 h-fit max-h-[780px] overflow-y-auto">
+            {selectedEntity?.kind === 'table' && (
+              <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-subtle border border-theme">
+                <button
+                  type="button"
+                  onClick={() => setSidebarTab('guests')}
+                  className={`inline-flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold cursor-pointer ${
+                    sidebarTab === 'guests' ? 'bg-accent text-accent-contrast' : 'text-ink'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  Convidados
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSidebarTab('tokens')}
+                  className={`inline-flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold cursor-pointer ${
+                    sidebarTab === 'tokens' ? 'bg-accent text-accent-contrast' : 'text-ink'
+                  }`}
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Tokens
+                </button>
+              </div>
+            )}
 
-          {selectedEntity?.kind === 'table' && sidebarTab === 'guests' ? (
-            <div className="space-y-4">
-              {(() => {
-                const occupied = occupancyByTable[selectedEntity.id] || 0;
-                const cap = Math.max(1, Number(selectedEntity.capacity) || 8);
-                const pct = Math.min(100, Math.round((occupied / cap) * 100));
-                const isOver = occupied > cap;
+            {selectedEntity?.kind === 'table' && sidebarTab === 'guests' ? (
+              <div className="space-y-4">
+                {(() => {
+                  const occupied = occupancyByTable[selectedEntity.id] || 0;
+                  const cap = Math.max(1, Number(selectedEntity.capacity) || 8);
+                  const pct = Math.min(100, Math.round((occupied / cap) * 100));
+                  const isOver = occupied > cap;
 
-                return (
-                  <div className="p-3 rounded-xl bg-subtle border border-theme space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-sm text-ink">{selectedEntity.name}</span>
-                      <span
-                        className={`text-xs font-mono font-bold ${
-                          isOver ? 'text-red-500' : 'text-ink'
-                        }`}
-                      >
-                        {occupied}/{cap} lug.
-                      </span>
+                  return (
+                    <div className="p-3 rounded-xl bg-subtle border border-theme space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-sm text-ink">{selectedEntity.name}</span>
+                        <span
+                          className={`text-xs font-mono font-bold ${
+                            isOver ? 'text-red-500' : 'text-ink'
+                          }`}
+                        >
+                          {occupied}/{cap} lug.
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-card rounded-full overflow-hidden">
+                        <div
+                          className={`h-full transition-all ${
+                            isOver ? 'bg-red-500' : 'bg-accent'
+                          }`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      {isOver && (
+                        <p className="text-[11px] text-red-500 font-semibold">
+                          Atenção: mesa acima da capacidade!
+                        </p>
+                      )}
                     </div>
-                    <div className="w-full h-2 bg-card rounded-full overflow-hidden">
-                      <div
-                        className={`h-full transition-all ${
-                          isOver ? 'bg-red-500' : 'bg-accent'
-                        }`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    {isOver && (
-                      <p className="text-[11px] text-red-500 font-semibold">
-                        Atenção: mesa acima da capacidade!
-                      </p>
-                    )}
+                  );
+                })()}
+
+                <div className="space-y-2">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-muted">
+                    Sentados nesta Mesa ({selectedTableGuests.length})
                   </div>
-                );
-              })()}
 
-              {/* Sentados nesta Mesa */}
-              <div className="space-y-2">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-muted">
-                  Sentados nesta Mesa ({selectedTableGuests.length})
+                  {selectedTableGuests.length === 0 ? (
+                    <p className="text-xs text-muted bg-primary border border-dashed border-theme rounded-xl p-3 text-center">
+                      Nenhum convidado vinculado ainda. Selecione abaixo para alocar.
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-0.5">
+                      {selectedTableGuests.map((g) => {
+                        const people = (Number(g.adults) || 0) + (Number(g.children) || 0);
+                        return (
+                          <div
+                            key={g.id}
+                            className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-primary border border-theme text-xs"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-semibold text-ink truncate">{g.name}</div>
+                              <div className="text-[11px] text-muted">
+                                {people} pessoa(s) • {g.group || 'Geral'}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleUnassignGuest(g)}
+                              title="Remover convidado desta mesa"
+                              className="p-1.5 rounded-lg bg-subtle hover:opacity-80 text-ink shrink-0 cursor-pointer"
+                            >
+                              <UserMinus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
-                {selectedTableGuests.length === 0 ? (
-                  <p className="text-xs text-muted bg-primary border border-dashed border-theme rounded-xl p-3 text-center">
-                    Nenhum convidado vinculado ainda. Selecione abaixo para alocar.
-                  </p>
-                ) : (
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-0.5">
-                    {selectedTableGuests.map((g) => {
-                      const people = (Number(g.adults) || 0) + (Number(g.children) || 0);
-                      return (
-                        <div
-                          key={g.id}
-                          className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-primary border border-theme text-xs"
-                        >
-                          <div className="min-w-0">
-                            <div className="font-semibold text-ink truncate">{g.name}</div>
-                            <div className="text-[11px] text-muted">
-                              {people} pessoa(s) • {g.group || 'Geral'}
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleUnassignGuest(g)}
-                            title="Remover convidado desta mesa"
-                            className="p-1.5 rounded-lg bg-subtle hover:opacity-80 text-ink shrink-0 cursor-pointer"
+                <div className="space-y-2.5 pt-3 border-t border-theme">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-muted">
+                      Vincular Convidados
+                    </span>
+                    <div className="inline-flex rounded-lg bg-subtle p-0.5 text-[10px] font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => setGuestScope('unassigned')}
+                        className={`px-2 py-0.5 rounded-md cursor-pointer ${
+                          guestScope === 'unassigned'
+                            ? 'bg-accent text-accent-contrast'
+                            : 'text-ink'
+                        }`}
+                      >
+                        Sem mesa
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setGuestScope('all')}
+                        className={`px-2 py-0.5 rounded-md cursor-pointer ${
+                          guestScope === 'all' ? 'bg-accent text-accent-contrast' : 'text-ink'
+                        }`}
+                      >
+                        Todos
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-muted absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      ref={guestSearchRef}
+                      type="text"
+                      placeholder="Buscar nome ou grupo..."
+                      value={guestSearch}
+                      onChange={(e) => setGuestSearch(e.target.value)}
+                      className="w-full pl-8 pr-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs focus:outline-none"
+                    />
+                  </div>
+
+                  {availableGuestsForTable.length === 0 ? (
+                    <p className="text-xs text-muted text-center py-3">
+                      {guests.length === 0
+                        ? 'Cadastre convidados na aba Administrar Convidados primeiro.'
+                        : 'Nenhum convidado encontrado neste filtro.'}
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-64 overflow-y-auto pr-0.5">
+                      {availableGuestsForTable.map((g) => {
+                        const people = (Number(g.adults) || 0) + (Number(g.children) || 0);
+                        const currentTableName = g.tableId ? tablesMap[g.tableId] : null;
+                        return (
+                          <div
+                            key={g.id}
+                            className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-subtle text-xs"
                           >
-                            <UserMinus className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                            <div className="min-w-0">
+                              <div className="font-semibold text-ink truncate">{g.name}</div>
+                              <div className="text-[11px] text-muted truncate">
+                                {people}p • {g.group || 'Geral'}
+                                {currentTableName ? ` • ${currentTableName}` : ''}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleAssignGuestToSelectedTable(g)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-accent text-accent-contrast text-[11px] font-semibold hover:opacity-90 shrink-0 cursor-pointer"
+                            >
+                              {currentTableName ? (
+                                <>
+                                  <ArrowRightLeft className="w-3 h-3" />
+                                  Mover
+                                </>
+                              ) : (
+                                <>
+                                  <UserPlus className="w-3 h-3" />
+                                  Alocar
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <h3 className="font-bold text-ink text-sm">2. Bandeja de Tokens</h3>
+                  <p className="text-xs text-muted">
+                    Clique para lançar um token no salão ou clique em uma mesa no mapa para alocar convidados:
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-muted">
+                    Tokens de Mesas (Sincronizados)
+                  </div>
+                  <div className="grid grid-cols-1 gap-1.5">
+                    {TABLE_TOKENS.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => handleSpawnTableToken(t)}
+                        className="flex items-center justify-between px-3 py-2 rounded-xl bg-accent text-accent-contrast text-xs font-semibold hover:opacity-90 transition cursor-pointer"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          {t.shape === 'round' ? (
+                            <Circle className="w-3.5 h-3.5" />
+                          ) : (
+                            <Square className="w-3.5 h-3.5" />
+                          )}
+                          {t.label}
+                        </span>
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 pt-2 border-t border-theme">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-muted">
+                    Paredes & Estrutura
+                  </div>
+                  <div className="grid grid-cols-2 lg:grid-cols-1 gap-1.5">
+                    {STRUCTURE_TOKENS.map((preset) => {
+                      const Icon = preset.icon;
+                      return (
+                        <button
+                          key={preset.type}
+                          type="button"
+                          onClick={() => handleSpawnDecorToken(preset)}
+                          className="flex items-center justify-between px-3 py-2 rounded-xl bg-subtle hover:opacity-85 text-ink text-xs font-semibold transition cursor-pointer text-left"
+                        >
+                          <span className="inline-flex items-center gap-2">
+                            <Icon className="w-3.5 h-3.5 shrink-0" />
+                            {preset.label}
+                          </span>
+                          <Plus className="w-3.5 h-3.5 shrink-0 opacity-70" />
+                        </button>
                       );
                     })}
                   </div>
-                )}
-              </div>
+                </div>
 
-              {/* Vincular Novos Convidados */}
-              <div className="space-y-2.5 pt-3 border-t border-theme">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-muted">
-                    Vincular Convidados
-                  </span>
-                  <div className="inline-flex rounded-lg bg-subtle p-0.5 text-[10px] font-semibold">
-                    <button
-                      type="button"
-                      onClick={() => setGuestScope('unassigned')}
-                      className={`px-2 py-0.5 rounded-md cursor-pointer ${
-                        guestScope === 'unassigned'
-                          ? 'bg-accent text-accent-contrast'
-                          : 'text-ink'
-                      }`}
-                    >
-                      Sem mesa
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setGuestScope('all')}
-                      className={`px-2 py-0.5 rounded-md cursor-pointer ${
-                        guestScope === 'all' ? 'bg-accent text-accent-contrast' : 'text-ink'
-                      }`}
-                    >
-                      Todos
-                    </button>
+                <div className="space-y-1.5 pt-2 border-t border-theme">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-muted">
+                    Cerimônia, Cadeiras & Decoração
                   </div>
-                </div>
-
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-muted absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    ref={guestSearchRef}
-                    type="text"
-                    placeholder="Buscar nome ou grupo..."
-                    value={guestSearch}
-                    onChange={(e) => setGuestSearch(e.target.value)}
-                    className="w-full pl-8 pr-3 py-2 rounded-xl bg-primary border border-theme text-ink text-xs focus:outline-none"
-                  />
-                </div>
-
-                {availableGuestsForTable.length === 0 ? (
-                  <p className="text-xs text-muted text-center py-3">
-                    {guests.length === 0
-                      ? 'Cadastre convidados na aba Administrar Convidados primeiro.'
-                      : 'Nenhum convidado encontrado neste filtro.'}
-                  </p>
-                ) : (
-                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-0.5">
-                    {availableGuestsForTable.map((g) => {
-                      const people = (Number(g.adults) || 0) + (Number(g.children) || 0);
-                      const currentTableName = g.tableId ? tablesMap[g.tableId] : null;
+                  <div className="grid grid-cols-2 lg:grid-cols-1 gap-1.5">
+                    {DECOR_TOKENS.map((preset) => {
+                      const Icon = preset.icon;
                       return (
-                        <div
-                          key={g.id}
-                          className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-subtle text-xs"
+                        <button
+                          key={preset.type}
+                          type="button"
+                          onClick={() => handleSpawnDecorToken(preset)}
+                          className="flex items-center justify-between px-3 py-2 rounded-xl bg-subtle hover:opacity-85 text-ink text-xs font-semibold transition cursor-pointer text-left"
                         >
-                          <div className="min-w-0">
-                            <div className="font-semibold text-ink truncate">{g.name}</div>
-                            <div className="text-[11px] text-muted truncate">
-                              {people}p • {g.group || 'Geral'}
-                              {currentTableName ? ` • ${currentTableName}` : ''}
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleAssignGuestToSelectedTable(g)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-accent text-accent-contrast text-[11px] font-semibold hover:opacity-90 shrink-0 cursor-pointer"
-                          >
-                            {currentTableName ? (
-                              <>
-                                <ArrowRightLeft className="w-3 h-3" />
-                                Mover
-                              </>
-                            ) : (
-                              <>
-                                <UserPlus className="w-3 h-3" />
-                                Alocar
-                              </>
-                            )}
-                          </button>
-                        </div>
+                          <span className="inline-flex items-center gap-2">
+                            <Icon className="w-3.5 h-3.5 shrink-0" />
+                            {preset.label}
+                          </span>
+                          <Plus className="w-3.5 h-3.5 shrink-0 opacity-70" />
+                        </button>
                       );
                     })}
                   </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <>
-              <div>
-                <h3 className="font-bold text-ink text-sm">2. Bandeja de Tokens</h3>
-                <p className="text-xs text-muted">
-                  Clique para lançar um token no salão ou clique em uma mesa no mapa para alocar convidados:
-                </p>
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-muted">
-                  Tokens de Mesas (Sincronizados)
                 </div>
-                <div className="grid grid-cols-1 gap-1.5">
-                  {TABLE_TOKENS.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => handleSpawnTableToken(t)}
-                      className="flex items-center justify-between px-3 py-2 rounded-xl bg-accent text-accent-contrast text-xs font-semibold hover:opacity-90 transition cursor-pointer"
-                    >
-                      <span className="inline-flex items-center gap-2">
-                        {t.shape === 'round' ? (
-                          <Circle className="w-3.5 h-3.5" />
-                        ) : (
-                          <Square className="w-3.5 h-3.5" />
-                        )}
-                        {t.label}
-                      </span>
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-1.5 pt-2 border-t border-theme">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-muted">
-                  Paredes & Estrutura
-                </div>
-                <div className="grid grid-cols-2 lg:grid-cols-1 gap-1.5">
-                  {STRUCTURE_TOKENS.map((preset) => {
-                    const Icon = preset.icon;
-                    return (
-                      <button
-                        key={preset.type}
-                        type="button"
-                        onClick={() => handleSpawnDecorToken(preset)}
-                        className="flex items-center justify-between px-3 py-2 rounded-xl bg-subtle hover:opacity-85 text-ink text-xs font-semibold transition cursor-pointer text-left"
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <Icon className="w-3.5 h-3.5 shrink-0" />
-                          {preset.label}
-                        </span>
-                        <Plus className="w-3.5 h-3.5 shrink-0 opacity-70" />
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="space-y-1.5 pt-2 border-t border-theme">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-muted">
-                  Cerimônia, Cadeiras & Decoração
-                </div>
-                <div className="grid grid-cols-2 lg:grid-cols-1 gap-1.5">
-                  {DECOR_TOKENS.map((preset) => {
-                    const Icon = preset.icon;
-                    return (
-                      <button
-                        key={preset.type}
-                        type="button"
-                        onClick={() => handleSpawnDecorToken(preset)}
-                        className="flex items-center justify-between px-3 py-2 rounded-xl bg-subtle hover:opacity-85 text-ink text-xs font-semibold transition cursor-pointer text-left"
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <Icon className="w-3.5 h-3.5 shrink-0" />
-                          {preset.label}
-                        </span>
-                        <Plus className="w-3.5 h-3.5 shrink-0 opacity-70" />
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Tabuleiro / Planta Baixa */}
-        <div className="lg:col-span-3 bg-card border border-theme rounded-2xl p-5 overflow-auto">
-          {tool === 'ruler' && (
+        <div
+          className={`${
+            readOnly ? '' : 'lg:col-span-3'
+          } bg-card border border-theme rounded-2xl p-5 overflow-auto`}
+        >
+          {readOnly && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-muted">
+                Visualização do salão ({roomWidth}m × {roomLength}m)
+              </p>
+              <div className="inline-flex items-center rounded-xl bg-primary border border-theme p-1">
+                <button
+                  type="button"
+                  onClick={() => setZoom((z) => Math.max(0.5, Number((z - 0.1).toFixed(1))))}
+                  className="p-1.5 rounded-lg hover:bg-subtle text-ink cursor-pointer"
+                >
+                  <ZoomOut className="w-3.5 h-3.5" />
+                </button>
+                <span className="px-2 text-xs font-bold text-ink">{Math.round(zoom * 100)}%</span>
+                <button
+                  type="button"
+                  onClick={() => setZoom((z) => Math.min(1.6, Number((z + 0.1).toFixed(1))))}
+                  className="p-1.5 rounded-lg hover:bg-subtle text-ink cursor-pointer"
+                >
+                  <ZoomIn className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!readOnly && tool === 'ruler' && (
             <div className="mb-3 px-3.5 py-2 rounded-xl bg-accent text-accent-contrast text-xs font-semibold flex items-center justify-between">
               <span>
                 Modo Régua ativo: clique e arraste sobre a planta para medir distâncias em metros.
@@ -1140,7 +1185,7 @@ export default function LayoutPlanner({
                   top: 28,
                   width: canvasW,
                   height: canvasH,
-                  cursor: tool === 'ruler' ? 'crosshair' : 'default',
+                  cursor: !readOnly && tool === 'ruler' ? 'crosshair' : 'default',
                   backgroundImage: showSubGrid
                     ? `linear-gradient(to right, var(--border-color) 1.5px, transparent 1.5px),
                        linear-gradient(to bottom, var(--border-color) 1.5px, transparent 1.5px),
@@ -1169,15 +1214,15 @@ export default function LayoutPlanner({
                 )}
 
                 {layoutItems.map((item) => {
-                  const isDragged = draftPos && draftPos.id === item.id;
-                  const isResized = draftSize && draftSize.id === item.id;
+                  const isDragged = !readOnly && draftPos && draftPos.id === item.id;
+                  const isResized = !readOnly && draftSize && draftSize.id === item.id;
                   const x = isDragged ? draftPos.x : item.x ?? 40;
                   const y = isDragged ? draftPos.y : item.y ?? 40;
                   const wMeters = isResized ? draftSize.widthM : Number(item.widthM) || 2;
                   const hMeters = isResized ? draftSize.heightM : Number(item.heightM) || 1.5;
                   const w = wMeters * PX_PER_METER;
                   const h = hMeters * PX_PER_METER;
-                  const isSelected = selected?.kind === 'item' && selected.id === item.id;
+                  const isSelected = !readOnly && selected?.kind === 'item' && selected.id === item.id;
                   const isWall = item.type === 'wall';
                   const isPillar = item.type === 'pillar';
 
@@ -1194,9 +1239,11 @@ export default function LayoutPlanner({
                         width: w,
                         height: h,
                         transform: `rotate(${item.rotation || 0}deg)`,
-                        touchAction: 'none',
+                        touchAction: readOnly ? 'auto' : 'none',
                       }}
-                      className={`absolute flex flex-col items-center justify-center text-center cursor-grab active:cursor-grabbing transition-shadow ${
+                      className={`absolute flex flex-col items-center justify-center text-center transition-shadow ${
+                        readOnly ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'
+                      } ${
                         isWall
                           ? 'bg-ink text-accent-contrast rounded-sm'
                           : isPillar
@@ -1215,7 +1262,7 @@ export default function LayoutPlanner({
                         </>
                       )}
 
-                      {isSelected && (
+                      {!readOnly && isSelected && (
                         <div
                           onPointerDown={(e) => handleResizePointerDown(e, item)}
                           onPointerMove={handleResizePointerMove}
@@ -1231,13 +1278,14 @@ export default function LayoutPlanner({
                 {tables.map((table, idx) => {
                   const defaultX = 80 + (idx % 4) * 165;
                   const defaultY = 80 + Math.floor(idx / 4) * 165;
-                  const isDragged = draftPos && draftPos.id === table.id;
+                  const isDragged = !readOnly && draftPos && draftPos.id === table.id;
                   const x = isDragged ? draftPos.x : table.x ?? defaultX;
                   const y = isDragged ? draftPos.y : table.y ?? defaultY;
                   const capacity = Math.max(1, Number(table.capacity) || 8);
                   const occupied = occupancyByTable[table.id] || 0;
                   const isRect = table.shape === 'rect';
-                  const isSelected = selected?.kind === 'table' && selected.id === table.id;
+                  const isSelected = !readOnly && selected?.kind === 'table' && selected.id === table.id;
+                  const isMyTable = Boolean(highlightTableId && highlightTableId === table.id);
 
                   return (
                     <div
@@ -1254,12 +1302,18 @@ export default function LayoutPlanner({
                         width: 124,
                         height: 124,
                         transform: `rotate(${table.rotation || 0}deg)`,
-                        touchAction: 'none',
+                        touchAction: readOnly ? 'auto' : 'none',
                       }}
-                      title="Clique para alocar convidados ou arraste para mover"
-                      className={`absolute flex items-center justify-center cursor-grab active:cursor-grabbing ${
-                        isSelected ? 'z-30' : 'z-20'
-                      }`}
+                      title={
+                        readOnly
+                          ? isMyTable
+                            ? 'Sua mesa'
+                            : table.name
+                          : 'Clique para alocar convidados ou arraste para mover'
+                      }
+                      className={`absolute flex items-center justify-center ${
+                        readOnly ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'
+                      } ${isSelected || isMyTable ? 'z-30' : 'z-20'}`}
                     >
                       {Array.from({ length: capacity }).map((_, seatIdx) => {
                         const isSeatOccupied = seatIdx < occupied;
@@ -1299,7 +1353,7 @@ export default function LayoutPlanner({
                         className={`flex flex-col items-center justify-center text-center px-2 shadow-lg transition ${
                           isRect ? 'w-28 h-14 rounded-xl' : 'w-20 h-20 rounded-full'
                         } ${
-                          isSelected
+                          isSelected || isMyTable
                             ? 'bg-accent text-accent-contrast ring-4 ring-ink/35'
                             : 'bg-card text-ink border-2 border-ink'
                         }`}
@@ -1315,7 +1369,7 @@ export default function LayoutPlanner({
                   );
                 })}
 
-                {rulerLine && (
+                {!readOnly && rulerLine && (
                   <svg className="absolute inset-0 w-full h-full pointer-events-none z-40">
                     <line
                       x1={rulerLine.x1}
@@ -1361,7 +1415,9 @@ export default function LayoutPlanner({
                         Salão Vazio ({roomWidth}m × {roomLength}m)
                       </p>
                       <p className="text-xs text-muted mt-1">
-                        Clique nos tokens da bandeja ao lado para posicionar mesas, paredes, altar e decoração no mapa.
+                        {readOnly
+                          ? 'Os noivos ainda não posicionaram mesas ou itens no mapa.'
+                          : 'Clique nos tokens da bandeja ao lado para posicionar mesas, paredes, altar e decoração no mapa.'}
                       </p>
                     </div>
                   </div>
