@@ -1,4 +1,7 @@
 import { useEffect, useState } from 'react';
+import { signInAnonymously } from 'firebase/auth';
+import { Sparkles, RotateCcw, LogOut } from 'lucide-react';
+import { auth } from './services/firebase';
 import { useAuth } from './contexts/AuthContext';
 import { useWedding } from './hooks/useWedding';
 import { useGuests } from './hooks/useGuests';
@@ -9,6 +12,7 @@ import {
   downloadJsonBackup,
 } from './services/weddingService';
 import { findGuestByPin } from './services/guestInviteService';
+import { seedDemoWeddingData } from './services/demoSeedService';
 
 import Login from './pages/Login';
 import GuestPortal from './pages/GuestPortal';
@@ -33,6 +37,14 @@ export default function App() {
   const [coupleModalOpen, setCoupleModalOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [guestSession, setGuestSession] = useState(null);
+  const [resettingDemo, setResettingDemo] = useState(false);
+  const [demoMode, setDemoMode] = useState(() => {
+    try {
+      return sessionStorage.getItem('eternize_demo_mode') === '1';
+    } catch {
+      return false;
+    }
+  });
 
   const searchParams =
     typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
@@ -40,8 +52,11 @@ export default function App() {
   const invitePinParam = searchParams?.get('pin') || '';
 
   const uid = user?.uid;
+  const shouldLoadCoupleWedding =
+    !guestSession && !inviteWeddingId && user && (!user.isAnonymous || demoMode);
+
   const { wedding, weddingId, setWeddingId } = useWedding(
-    guestSession || inviteWeddingId ? null : uid
+    shouldLoadCoupleWedding ? uid : null
   );
   const { guests, stats: guestStats } = useGuests(weddingId);
   const checklistCol = useCollection(weddingId, 'checklist');
@@ -75,6 +90,45 @@ export default function App() {
       wedding: result.weddingData,
       guest: result.guestData,
     });
+  };
+
+  const handleDemoLogin = async () => {
+    if (!auth) throw new Error('Firebase não configurado.');
+    const cred = auth.currentUser
+      ? { user: auth.currentUser }
+      : await signInAnonymously(auth);
+    const demoId = await seedDemoWeddingData(cred.user.uid, { force: false });
+    try {
+      sessionStorage.setItem('eternize_demo_mode', '1');
+    } catch {
+      // ignora
+    }
+    setDemoMode(true);
+    setWeddingId(demoId);
+    notify('Perfil demonstração Bibi & Nick carregado!');
+  };
+
+  const handleRestoreDemoData = async () => {
+    if (!uid || resettingDemo) return;
+    setResettingDemo(true);
+    try {
+      const demoId = await seedDemoWeddingData(uid, { force: true });
+      setWeddingId(demoId);
+      notify('Dados genéricos de Bibi & Nick restaurados!');
+    } finally {
+      setResettingDemo(false);
+    }
+  };
+
+  const handleFullLogout = async () => {
+    try {
+      sessionStorage.removeItem('eternize_demo_mode');
+    } catch {
+      // ignora
+    }
+    setDemoMode(false);
+    setGuestSession(null);
+    await logout();
   };
 
   // 1. Modo Convidado via QR Code (?convite=...)
@@ -115,8 +169,13 @@ export default function App() {
     );
   }
 
-  if (!user || user.isAnonymous) {
-    return <Login onGuestPinLogin={handleGuestPinLogin} />;
+  if (!user || (user.isAnonymous && !demoMode)) {
+    return (
+      <Login
+        onGuestPinLogin={handleGuestPinLogin}
+        onDemoLogin={handleDemoLogin}
+      />
+    );
   }
 
   const handleExportBackup = () => {
@@ -143,12 +202,42 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-primary text-ink pb-16">
+      {demoMode && (
+        <div className="bg-accent text-accent-contrast px-4 py-2 text-xs no-print">
+          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5 font-semibold">
+              <Sparkles className="w-3.5 h-3.5" />
+              Modo Demonstração • Bibi &amp; Nick (Código: BIBI27 • PINs: 1001 a 1008)
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={resettingDemo}
+                onClick={handleRestoreDemoData}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-accent-contrast text-accent font-bold hover:opacity-90 cursor-pointer"
+              >
+                <RotateCcw className="w-3 h-3" />
+                {resettingDemo ? 'Restaurando...' : 'Restaurar Dados Demo'}
+              </button>
+              <button
+                type="button"
+                onClick={handleFullLogout}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-current/30 font-semibold hover:opacity-85 cursor-pointer"
+              >
+                <LogOut className="w-3 h-3" />
+                Sair do Demo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Header
         wedding={wedding}
         onOpenCoupleModal={() => setCoupleModalOpen(true)}
         onExportBackup={handleExportBackup}
         onClearAll={handleClearAll}
-        onLogout={logout}
+        onLogout={handleFullLogout}
       />
 
       <KpiCards
