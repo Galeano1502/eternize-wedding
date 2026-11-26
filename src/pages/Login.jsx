@@ -23,11 +23,9 @@ export default function Login({ onGuestPinLogin, onDemoLogin }) {
   const [mode, setMode] = useState('couple'); // 'couple' | 'guest'
   const [isRegister, setIsRegister] = useState(false);
 
-  // Campos Casal
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  // Campos Convidado
   const [pin, setPin] = useState('');
   const [weddingCode, setWeddingCode] = useState('');
 
@@ -93,10 +91,16 @@ export default function Login({ onGuestPinLogin, onDemoLogin }) {
     try {
       await onDemoLogin();
     } catch (err) {
-      console.error(err);
-      setError(
-        'Não foi possível iniciar o perfil demonstração. Verifique se o login Anônimo está ativo no Firebase Authentication.'
-      );
+      console.error('Erro ao iniciar modo demo:', err);
+      if (err?.code === 'permission-denied') {
+        setError(
+          'Permissão negada no Firestore (permission-denied). Publique as regras atualizadas na aba Firestore Database > Regras no Console do Firebase.'
+        );
+      } else {
+        setError(
+          `Não foi possível iniciar o perfil demonstração (${err?.code || err?.message || 'erro desconhecido'}).`
+        );
+      }
     } finally {
       setDemoLoading(false);
     }
@@ -104,7 +108,6 @@ export default function Login({ onGuestPinLogin, onDemoLogin }) {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-primary text-ink relative">
-      {/* Botão de tema no canto superior */}
       <button
         type="button"
         onClick={toggleTheme}
@@ -115,7 +118,6 @@ export default function Login({ onGuestPinLogin, onDemoLogin }) {
       </button>
 
       <div className="max-w-md w-full space-y-4">
-        {/* Card Principal de Login */}
         <div className="bg-card border border-theme rounded-2xl p-6 sm:p-8 shadow-xl space-y-5">
           <div className="text-center">
             <div className="w-12 h-12 rounded-2xl bg-accent text-accent-contrast flex items-center justify-center mx-auto mb-3">
@@ -127,7 +129,6 @@ export default function Login({ onGuestPinLogin, onDemoLogin }) {
             </p>
           </div>
 
-          {/* Seletor: Casal vs Convidado */}
           <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-subtle border border-theme">
             <button
               type="button"
@@ -285,7 +286,6 @@ export default function Login({ onGuestPinLogin, onDemoLogin }) {
           )}
         </div>
 
-        {/* Cartão de Acesso Rápido ao Perfil Genérico (Bibi & Nick) */}
         <div className="bg-card border border-theme rounded-2xl p-5 shadow-md space-y-3">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-xl bg-subtle text-ink flex items-center justify-center shrink-0">

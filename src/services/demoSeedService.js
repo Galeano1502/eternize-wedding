@@ -75,7 +75,7 @@ export async function seedDemoWeddingData(uid, { force = false } = {}) {
   const weddingRef = doc(db, 'weddings', DEMO_WEDDING_ID);
   const weddingSnap = await getDoc(weddingRef);
 
-  if (weddingSnap.exists() && !force) {
+  if (weddingSnap.exists()) {
     await updateDoc(weddingRef, {
       members: arrayUnion(uid),
       updatedAt: serverTimestamp(),
@@ -85,31 +85,47 @@ export async function seedDemoWeddingData(uid, { force = false } = {}) {
       { weddingId: DEMO_WEDDING_ID },
       { merge: true }
     );
-    return DEMO_WEDDING_ID;
-  }
 
-  // Limpa subcoleções antigas se estiver criando ou restaurando o demo
-  const subcollections = [
-    'guests',
-    'checklist',
-    'budget',
-    'vendors',
-    'tables',
-    'layoutItems',
-    'gifts',
-    'photos',
-  ];
-
-  for (const sub of subcollections) {
-    const snap = await getDocs(collection(db, 'weddings', DEMO_WEDDING_ID, sub));
-    if (!snap.empty) {
-      const batch = writeBatch(db);
-      snap.docs.forEach((d) => batch.delete(d.ref));
-      await batch.commit();
+    if (!force) {
+      return DEMO_WEDDING_ID;
     }
-  }
 
-  if (!weddingSnap.exists()) {
+    // Limpa subcoleções antigas apenas ao restaurar um documento demo já existente
+    const subcollections = [
+      'guests',
+      'checklist',
+      'budget',
+      'vendors',
+      'tables',
+      'layoutItems',
+      'gifts',
+      'photos',
+    ];
+
+    for (const sub of subcollections) {
+      const snap = await getDocs(collection(db, 'weddings', DEMO_WEDDING_ID, sub));
+      if (!snap.empty) {
+        const batch = writeBatch(db);
+        snap.docs.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+      }
+    }
+
+    await updateDoc(weddingRef, {
+      coupleNames: 'Bibi & Nick',
+      weddingDate: '2027-06-19',
+      weddingTime: '16:30',
+      venue: 'Espaço Villa Jardim — Fazenda Santa Clara',
+      inviteTemplate: DEFAULT_INVITE_TEMPLATE,
+      inviteCode: 'BIBI27',
+      members: arrayUnion(uid),
+      hallWidth: 20,
+      hallLength: 14,
+      hallShape: 'rect',
+      updatedAt: serverTimestamp(),
+    });
+  } else {
+    // Cria primeiro o documento principal para garantir permissão de escrita nas subcoleções
     await setDoc(weddingRef, {
       coupleNames: 'Bibi & Nick',
       weddingDate: '2027-06-19',
@@ -125,27 +141,13 @@ export async function seedDemoWeddingData(uid, { force = false } = {}) {
       updatedAt: serverTimestamp(),
       createdAt: serverTimestamp(),
     });
-  } else {
-    await updateDoc(weddingRef, {
-      coupleNames: 'Bibi & Nick',
-      weddingDate: '2027-06-19',
-      weddingTime: '16:30',
-      venue: 'Espaço Villa Jardim — Fazenda Santa Clara',
-      inviteTemplate: DEFAULT_INVITE_TEMPLATE,
-      inviteCode: 'BIBI27',
-      members: arrayUnion(uid),
-      hallWidth: 20,
-      hallLength: 14,
-      hallShape: 'rect',
-      updatedAt: serverTimestamp(),
-    });
-  }
 
-  await setDoc(
-    doc(db, 'users', uid),
-    { weddingId: DEMO_WEDDING_ID },
-    { merge: true }
-  );
+    await setDoc(
+      doc(db, 'users', uid),
+      { weddingId: DEMO_WEDDING_ID },
+      { merge: true }
+    );
+  }
 
   // Mesas
   const tablesCol = collection(db, 'weddings', DEMO_WEDDING_ID, 'tables');
