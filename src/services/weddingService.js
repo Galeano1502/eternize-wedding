@@ -117,6 +117,7 @@ export async function clearAllWeddingData(weddingId) {
     'tables',
     'layoutItems',
     'gifts',
+    'photos',
   ];
 
   for (const sub of subcollections) {

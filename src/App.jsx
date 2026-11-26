@@ -3,12 +3,12 @@ import { useAuth } from './contexts/AuthContext';
 import { useWedding } from './hooks/useWedding';
 import { useGuests } from './hooks/useGuests';
 import { useCollection } from './hooks/useCollection';
-import { findGuestByPin } from './services/guestInviteService';
 import {
   updateWeddingInfo,
   clearAllWeddingData,
   downloadJsonBackup,
 } from './services/weddingService';
+import { findGuestByPin } from './services/guestInviteService';
 
 import Login from './pages/Login';
 import GuestPortal from './pages/GuestPortal';
@@ -25,34 +25,36 @@ import Vendors from './pages/Vendors';
 import Tables from './pages/Tables';
 import LayoutPlanner from './pages/LayoutPlanner';
 import GiftRegistry from './pages/GiftRegistry';
+import WeddingPhotosGallery from './components/photos/WeddingPhotosGallery';
 
 export default function App() {
   const { user, loading: authLoading, logout } = useAuth();
   const [activeTab, setActiveTab] = useState('guests');
   const [coupleModalOpen, setCoupleModalOpen] = useState(false);
   const [toast, setToast] = useState(null);
-  const [guestSession, setGuestSession] = useState(null); // { weddingId, wedding, guest }
+  const [guestSession, setGuestSession] = useState(null);
+
+  const searchParams =
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const inviteWeddingId = searchParams?.get('convite') || '';
+  const invitePinParam = searchParams?.get('pin') || '';
 
   const uid = user?.uid;
-  const effectiveWeddingId = guestSession?.weddingId || null;
-
-  const { wedding, weddingId, setWeddingId, loading: weddingLoading } = useWedding(
-    guestSession ? null : uid
+  const { wedding, weddingId, setWeddingId } = useWedding(
+    guestSession || inviteWeddingId ? null : uid
   );
-
-  const activeWeddingId = guestSession ? effectiveWeddingId : weddingId;
-
-  const { guests, stats: guestStats } = useGuests(activeWeddingId);
-  const checklistCol = useCollection(guestSession ? null : activeWeddingId, 'checklist');
-  const budgetCol = useCollection(guestSession ? null : activeWeddingId, 'budget');
-  const vendorsCol = useCollection(guestSession ? null : activeWeddingId, 'vendors');
-  const tablesCol = useCollection(activeWeddingId, 'tables');
-  const layoutCol = useCollection(activeWeddingId, 'layoutItems');
-  const giftsCol = useCollection(activeWeddingId, 'gifts');
+  const { guests, stats: guestStats } = useGuests(weddingId);
+  const checklistCol = useCollection(weddingId, 'checklist');
+  const budgetCol = useCollection(weddingId, 'budget');
+  const vendorsCol = useCollection(weddingId, 'vendors');
+  const tablesCol = useCollection(weddingId, 'tables');
+  const layoutCol = useCollection(weddingId, 'layoutItems');
+  const giftsCol = useCollection(weddingId, 'gifts');
+  const photosCol = useCollection(weddingId, 'photos');
 
   const activeWedding = guestSession
-    ? { ...wedding, ...guestSession.wedding, id: activeWeddingId }
-    : { ...wedding, id: activeWeddingId };
+    ? { ...guestSession.wedding, ...wedding }
+    : wedding;
 
   useEffect(() => {
     const coupleLabel = activeWedding?.coupleNames?.trim();
@@ -75,12 +77,37 @@ export default function App() {
     });
   };
 
-  const handleGuestLogout = async () => {
-    setGuestSession(null);
-    await logout();
-  };
+  // 1. Modo Convidado via QR Code (?convite=...)
+  if (inviteWeddingId) {
+    return (
+      <GuestPortal
+        weddingId={inviteWeddingId}
+        initialPin={invitePinParam}
+        onExitPreview={() => {
+          window.history.replaceState({}, '', window.location.pathname);
+          window.location.reload();
+        }}
+      />
+    );
+  }
 
-  if (authLoading || (!guestSession && user && weddingLoading)) {
+  // 2. Modo Convidado autenticado via PIN na tela de Login
+  if (guestSession) {
+    return (
+      <GuestPortal
+        weddingId={guestSession.weddingId}
+        initialPin={guestSession.guest?.pin || ''}
+        initialGuest={guestSession.guest}
+        initialWedding={guestSession.wedding}
+        onExitPreview={() => {
+          setGuestSession(null);
+          logout();
+        }}
+      />
+    );
+  }
+
+  if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-primary text-ink">
         <p className="font-serif-display text-xl">Carregando Eternize...</p>
@@ -88,36 +115,14 @@ export default function App() {
     );
   }
 
-  if (guestSession) {
-    const currentGuest =
-      guests.find((g) => g.id === guestSession.guest?.id) || guestSession.guest;
-
-    return (
-      <>
-        <GuestPortal
-          wedding={activeWedding}
-          guest={currentGuest}
-          guests={guests}
-          tables={tablesCol.items}
-          layoutItems={layoutCol.items}
-          gifts={giftsCol.items}
-          onReserveGift={giftsCol.updateItem}
-          onLogout={handleGuestLogout}
-          onNotify={notify}
-        />
-        <Toast toast={toast} onClose={() => setToast(null)} />
-      </>
-    );
-  }
-
-  if (!user) {
+  if (!user || user.isAnonymous) {
     return <Login onGuestPinLogin={handleGuestPinLogin} />;
   }
 
   const handleExportBackup = () => {
     downloadJsonBackup({
       exportedAt: new Date().toISOString(),
-      wedding: activeWedding,
+      wedding,
       guests,
       checklist: checklistCol.items,
       budget: budgetCol.items,
@@ -125,6 +130,7 @@ export default function App() {
       tables: tablesCol.items,
       layoutItems: layoutCol.items,
       gifts: giftsCol.items,
+      photos: photosCol.items,
     });
     notify('Backup JSON baixado!');
   };
@@ -138,7 +144,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-primary text-ink pb-16">
       <Header
-        wedding={activeWedding}
+        wedding={wedding}
         onOpenCoupleModal={() => setCoupleModalOpen(true)}
         onExportBackup={handleExportBackup}
         onClearAll={handleClearAll}
@@ -161,8 +167,9 @@ export default function App() {
           budget: budgetCol.items.length,
           vendors: vendorsCol.items.length,
           tables: tablesCol.items.length,
-          layout: tablesCol.items.length + layoutCol.items.length,
+          layout: layoutCol.items.length,
           gifts: giftsCol.items.length,
+          photos: photosCol.items.length,
         }}
       />
 
@@ -170,7 +177,7 @@ export default function App() {
         {activeTab === 'guests' && (
           <GuestsAdmin
             uid={weddingId}
-            wedding={activeWedding}
+            wedding={wedding}
             guests={guests}
             stats={guestStats}
             tables={tablesCol.items}
@@ -219,7 +226,7 @@ export default function App() {
 
         {activeTab === 'layout' && (
           <LayoutPlanner
-            wedding={activeWedding}
+            wedding={wedding}
             weddingId={weddingId}
             tables={tablesCol.items}
             guests={guests}
@@ -243,17 +250,24 @@ export default function App() {
             onNotify={notify}
           />
         )}
+
+        {activeTab === 'photos' && (
+          <WeddingPhotosGallery
+            weddingId={weddingId}
+            photos={photosCol.items}
+            uploaderName={wedding?.coupleNames?.trim() || 'Noivos'}
+            canModerate={true}
+            onNotify={notify}
+          />
+        )}
       </main>
 
       <CoupleModal
         isOpen={coupleModalOpen}
         onClose={() => setCoupleModalOpen(false)}
-        wedding={activeWedding}
+        wedding={wedding}
         uid={uid}
-        onJoinedWedding={(newId) => {
-          setWeddingId(newId);
-          notify('Contas vinculadas com sucesso!');
-        }}
+        onJoinedWedding={(newId) => setWeddingId(newId)}
         onSave={async (data) => {
           await updateWeddingInfo(weddingId, data);
           notify('Dados do casal salvos no Firebase!');
